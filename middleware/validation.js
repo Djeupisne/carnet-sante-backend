@@ -109,11 +109,12 @@ const registerValidation = [
     .isIn(['male', 'female', 'other'])
     .withMessage('Genre invalide (male, female, other)'),
   
+  // ✅ CORRIGÉ : Validation du téléphone plus flexible
   body('phoneNumber')
     .optional({ checkFalsy: true })
     .trim()
-    .isLength({ min: 8, max: 20 })
-    .withMessage('Le numéro doit contenir entre 8 et 20 caractères'),
+    .matches(/^\+?[\d\s\-\(\)]{8,20}$/) // Accepte +22893360150
+    .withMessage('Format de numéro de téléphone invalide'),
   
   body('bloodType')
     .optional({ checkFalsy: true })
@@ -125,7 +126,7 @@ const registerValidation = [
     .isIn(['patient', 'doctor', 'admin', 'hospital_admin'])
     .withMessage('Rôle invalide'),
   
-  // ✅ CORRIGÉ : Validation pour les champs doctors (optionnels)
+  // ✅ CORRIGÉ : Champs optionnels
   body('specialty')
     .optional({ checkFalsy: true })
     .trim()
@@ -141,7 +142,7 @@ const registerValidation = [
   body('biography')
     .optional({ checkFalsy: true })
     .trim()
-    .isLength({ min: 10 }) // ✅ Réduit de 50 à 10 pour les tests
+    .isLength({ min: 10 })
     .withMessage('La biographie doit contenir au moins 10 caractères'),
   
   body('languages')
