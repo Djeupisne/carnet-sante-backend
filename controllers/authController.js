@@ -13,13 +13,13 @@ const generateToken = (userId) => {
 };
 
 /**
- * POST /api/auth/register - CORRIGÉ
+ * POST /api/auth/register - CORRIGÉ DÉFINITIF
  */
 const register = async (req, res) => {
   try {
     console.log('\n📝 === REGISTER CONTROLLER ===');
     
-    // ✅ CORRIGÉ : Récupérer TOUS les champs
+    // Récupérer TOUS les champs
     const { 
       email, 
       password, 
@@ -29,11 +29,11 @@ const register = async (req, res) => {
       gender, 
       phoneNumber, 
       role,
-      bloodType,        // ✅ AJOUT
-      specialty,        // ✅ AJOUT
-      licenseNumber,    // ✅ AJOUT
-      biography,        // ✅ AJOUT
-      languages         // ✅ AJOUT
+      bloodType,
+      specialty,
+      licenseNumber,
+      biography,
+      languages
     } = req.body;
 
     console.log('Données reçues:', {
@@ -43,11 +43,11 @@ const register = async (req, res) => {
       dateOfBirth,
       gender,
       role: role || 'patient',
-      bloodType,        // ✅ AJOUT
-      specialty,        // ✅ AJOUT
-      licenseNumber,    // ✅ AJOUT
-      biography: biography ? `${biography.substring(0, 50)}...` : null, // ✅ AJOUT
-      languages         // ✅ AJOUT
+      bloodType,
+      specialty,
+      licenseNumber,
+      biography: biography ? `${biography.substring(0, 50)}...` : null,
+      languages
     });
 
     // Validation basique avant la création
@@ -83,31 +83,36 @@ const register = async (req, res) => {
     }
     console.log('Email disponible');
 
-    // Hacher le mot de passe
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // ✅ CORRIGÉ : Hacher le mot de passe AVANT la création
+    console.log('Hachage du mot de passe...');
+    const hashedPassword = await bcrypt.hash(password, 12); // ✅ 12 tours de sel
+    console.log('Mot de passe hashé avec succès');
 
-    // ✅ CORRIGÉ : Créer l'utilisateur avec TOUS les champs
+    // Créer l'utilisateur avec le mot de passe HACHÉ
     console.log('Création de l\'utilisateur...');
     const userData = {
       email: email.toLowerCase(),
-      password: hashedPassword,
+      password: hashedPassword, // ✅ Utiliser le mot de passe hashé
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       dateOfBirth,
       gender,
       phoneNumber: phoneNumber || null,
       role: role || 'patient',
-      bloodType: bloodType || null,        // ✅ AJOUT
-      specialty: specialty || null,        // ✅ AJOUT
-      licenseNumber: licenseNumber || null,// ✅ AJOUT
-      biography: biography || null,        // ✅ AJOUT
-      languages: languages || null,        // ✅ AJOUT
+      bloodType: bloodType || null,
+      specialty: specialty || null,
+      licenseNumber: licenseNumber || null,
+      biography: biography || null,
+      languages: languages || null,
       isActive: true,
       isVerified: false,
       profileCompleted: false
     };
 
-    console.log('Données utilisateur pour création:', userData);
+    console.log('Données utilisateur pour création (sans password):', {
+      ...userData,
+      password: '*** HASHED ***' // Ne pas logger le mot de passe
+    });
 
     const user = await User.create(userData);
 
@@ -115,9 +120,7 @@ const register = async (req, res) => {
       id: user.id, 
       email: user.email,
       uniqueCode: user.uniqueCode,
-      role: user.role,
-      bloodType: user.bloodType,    // ✅ AJOUT
-      specialty: user.specialty     // ✅ AJOUT
+      role: user.role
     });
 
     // Générer le token
@@ -135,9 +138,7 @@ const register = async (req, res) => {
         details: {
           email: user.email,
           role: user.role,
-          uniqueCode: user.uniqueCode,
-          bloodType: user.bloodType,  // ✅ AJOUT
-          specialty: user.specialty   // ✅ AJOUT
+          uniqueCode: user.uniqueCode
         }
       });
       console.log('Log d\'audit créé');
@@ -153,7 +154,6 @@ const register = async (req, res) => {
 
     console.log('✓ Enregistrement réussi\n');
 
-    // ✅ CORRIGÉ : Retourner tous les champs dans la réponse
     res.status(201).json({
       success: true,
       message: 'Utilisateur créé avec succès',
@@ -168,11 +168,11 @@ const register = async (req, res) => {
           gender: user.gender,
           dateOfBirth: user.dateOfBirth,
           phoneNumber: user.phoneNumber,
-          bloodType: user.bloodType,        // ✅ AJOUT
-          specialty: user.specialty,        // ✅ AJOUT
-          licenseNumber: user.licenseNumber,// ✅ AJOUT
-          biography: user.biography,        // ✅ AJOUT
-          languages: user.languages,        // ✅ AJOUT
+          bloodType: user.bloodType,
+          specialty: user.specialty,
+          licenseNumber: user.licenseNumber,
+          biography: user.biography,
+          languages: user.languages,
           isVerified: user.isVerified
         },
         token
@@ -182,9 +182,6 @@ const register = async (req, res) => {
   } catch (error) {
     console.error('\n❌ Erreur enregistrement:', error.message);
     console.error('Stack:', error.stack);
-    
-    // ✅ AMÉLIORÉ : Meilleur logging des erreurs
-    console.error('Données reçues qui ont causé l\'erreur:', req.body);
     
     logger.error('Erreur d\'enregistrement', {
       error: error.message,
@@ -215,16 +212,6 @@ const register = async (req, res) => {
       });
     }
 
-    // ✅ AJOUT : Gestion des erreurs de type de données
-    if (error.name === 'SequelizeDatabaseError') {
-      console.error('Erreur de base de données:', error.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Erreur de format de données',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
-
     res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de l\'enregistrement',
@@ -234,7 +221,7 @@ const register = async (req, res) => {
 };
 
 /**
- * POST /api/auth/login
+ * POST /api/auth/login - CORRIGÉ
  */
 const login = async (req, res) => {
   try {
@@ -242,7 +229,7 @@ const login = async (req, res) => {
     const { email, password } = req.body;
 
     console.log('Email reçu:', email);
-    console.log('Mot de passe reçu: (longueur)', password ? password.length : 'vide');
+    console.log('Mot de passe reçu:', password ? '***' : 'vide');
 
     if (!email || !password) {
       console.log('Email ou mot de passe manquant');
@@ -256,22 +243,22 @@ const login = async (req, res) => {
     console.log('Recherche de l\'utilisateur...');
     const user = await User.findOne({ 
       where: { email: email.toLowerCase() },
-      raw: false // Important: pour avoir accès aux méthodes du modèle
+      raw: false
     });
 
     if (!user) {
       console.log('Utilisateur non trouvé:', email);
       return res.status(401).json({
         success: false,
-        message: 'Identifiants invalides'
+        message: 'Email ou mot de passe incorrect'
       });
     }
 
     console.log('Utilisateur trouvé:', user.email);
-    console.log('Hash stocké:', user.password ? `${user.password.substring(0, 30)}...` : 'null');
+    console.log('Hash stocké présent:', !!user.password);
 
     // Vérifier le verrouillage du compte
-    if (user.isLocked()) {
+    if (user.isLocked && user.isLocked()) {
       console.log('Compte verrouillé');
       return res.status(423).json({
         success: false,
@@ -279,16 +266,16 @@ const login = async (req, res) => {
       });
     }
 
-    // Vérifier le mot de passe
+    // ✅ CORRIGÉ : Vérifier le mot de passe avec bcrypt DIRECTEMENT
     console.log('Vérification du mot de passe...');
-    console.log('Mot de passe candidat (longueur):', password.length);
-
+    
     let isPasswordValid = false;
     try {
-      isPasswordValid = await user.comparePassword(password);
-      console.log('Résultat comparePassword:', isPasswordValid);
+      // Utiliser bcrypt.compare directement au lieu de user.comparePassword
+      isPasswordValid = await bcrypt.compare(password, user.password);
+      console.log('Résultat bcrypt.compare:', isPasswordValid);
     } catch (compareError) {
-      console.error('Erreur lors de la comparaison:', compareError.message);
+      console.error('Erreur lors de la comparaison bcrypt:', compareError.message);
       return res.status(500).json({
         success: false,
         message: 'Erreur lors de la vérification du mot de passe'
@@ -297,30 +284,37 @@ const login = async (req, res) => {
 
     if (!isPasswordValid) {
       console.log('Mot de passe incorrect');
-      console.log('Incrémentation des tentatives de connexion...');
       
-      try {
-        await user.incLoginAttempts();
-        console.log('Tentatives mises à jour');
-      } catch (incError) {
-        console.error('Erreur lors de l\'incrémentation:', incError.message);
+      // Incrémenter les tentatives si la méthode existe
+      if (user.incLoginAttempts) {
+        try {
+          await user.incLoginAttempts();
+          console.log('Tentatives mises à jour');
+        } catch (incError) {
+          console.error('Erreur lors de l\'incrémentation:', incError.message);
+        }
       }
 
       return res.status(401).json({
         success: false,
-        message: 'Identifiants invalides'
+        message: 'Email ou mot de passe incorrect'
       });
     }
 
-    console.log('Mot de passe valide');
+    console.log('✅ Mot de passe valide');
 
     // Réinitialiser les tentatives
-    console.log('Réinitialisation des tentatives et mise à jour du lastLogin...');
-    await user.update({
-      loginAttempts: 0,
-      lockUntil: null,
-      lastLogin: new Date()
-    });
+    console.log('Réinitialisation des tentatives...');
+    if (user.resetLoginAttempts) {
+      await user.resetLoginAttempts();
+    } else {
+      // Fallback si la méthode n'existe pas
+      await user.update({
+        loginAttempts: 0,
+        lockUntil: null,
+        lastLogin: new Date()
+      });
+    }
 
     console.log('Tentatives réinitialisées');
 
@@ -375,7 +369,7 @@ const login = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur'
+      message: 'Erreur serveur lors de la connexion'
     });
   }
 };
@@ -488,7 +482,7 @@ const resetPassword = async (req, res) => {
     }
 
     // Hacher le nouveau mot de passe
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
     // Mettre à jour le mot de passe
     await user.update({
