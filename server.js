@@ -13,33 +13,50 @@ const { logger } = require('./utils/logger');
 
 const app = express();
 
+// ✅ MIDDLEWARE CORS CRITIQUE - PLACÉ EN PREMIER
+app.use((req, res, next) => {
+  const allowedOrigins = [
+    'https://carnet-sante-frontend.onrender.com', // ✅ URL PRODUCTION
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://192.168.47.233:3000',
+    'http://192.168.224.1:3000',
+    'http://192.168.200.1:3000'
+  ];
+  
+  const origin = req.headers.origin;
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  
+  // Répondre immédiatement aux requêtes OPTIONS (preflight)
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
 // Middleware de sécurité
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"]
-    }
-  }
+  contentSecurityPolicy: false // Désactivé pour simplifier les tests
 }));
 
 // Compression Gzip
 app.use(compression());
 
-// CORS COMPLET - TOUTES LES AUTORISATIONS
+// ✅ CONFIGURATION CORS SIMPLIFIÉE et FONCTIONNELLE
 app.use(cors({
   origin: function (origin, callback) {
-    // En développement, autoriser toutes les origines
-    if (process.env.NODE_ENV === 'development') {
-      return callback(null, true);
-    }
-    
-    // En production, utiliser les origines autorisées
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
+    // URLs autorisées
+    const allowedOrigins = [
+      'https://carnet-sante-frontend.onrender.com', // ✅ AJOUT CRITIQUE
       'http://localhost:3000',
       'http://127.0.0.1:3000',
       'http://192.168.47.233:3000',
@@ -47,10 +64,15 @@ app.use(cors({
       'http://192.168.200.1:3000'
     ];
     
+    // En développement, autoriser toutes les origines
+    if (process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
     // Autoriser les requêtes sans origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       console.log('🚫 Origin bloqué par CORS:', origin);
@@ -59,53 +81,43 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Accept',
-    'Origin',
-    'Access-Control-Request-Method',
-    'Access-Control-Request-Headers',
-    'X-API-Key'
-  ],
-  exposedHeaders: [
-    'Content-Range',
-    'X-Content-Range',
-    'Access-Control-Allow-Origin',
-    'Access-Control-Allow-Credentials'
-  ],
-  maxAge: 86400 // 24 heures
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  maxAge: 86400
 }));
 
-// Gestion explicite des requêtes OPTIONS (preflight)
-app.options('*', cors());
+// ✅ GESTION GLOBALE DES REQUÊTES OPTIONS
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://carnet-sante-frontend.onrender.com',
+    'http://localhost:3000'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.status(200).end();
+});
 
-// Middleware de debug CORS (en développement)
-if (process.env.NODE_ENV === 'development') {
-  app.use((req, res, next) => {
-    console.log('🌐 CORS Debug:', {
-      origin: req.headers.origin,
-      method: req.method,
-      url: req.url,
-      headers: req.headers
-    });
-    
-    // Headers CORS supplémentaires pour le développement
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 
-      'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
-    
-    next();
+// Middleware de debug CORS
+app.use((req, res, next) => {
+  console.log('🌐 Requête reçue:', {
+    method: req.method,
+    url: req.url,
+    origin: req.headers.origin,
+    'user-agent': req.headers['user-agent']
   });
-}
+  next();
+});
 
-// Rate limiting plus permissif en développement
+// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'development' ? 1000 : 100, // Plus permissif en dev
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'development' ? 1000 : 100,
   message: {
     success: false,
     message: 'Trop de requêtes depuis cette IP, veuillez réessayer plus tard.'
@@ -118,23 +130,19 @@ app.use(limiter);
 // Logging HTTP avec Morgan
 app.use(morgan('combined', { 
   stream: logger.stream,
-  skip: (req, res) => req.url === '/health' // Ne pas logger les health checks
+  skip: (req, res) => req.url === '/health'
 }));
 
-// Body parser middleware avec limites augmentées
+// Body parser middleware
 app.use(express.json({ 
-  limit: '50mb',
-  verify: (req, res, buf) => {
-    req.rawBody = buf;
-  }
+  limit: '50mb'
 }));
 app.use(express.urlencoded({ 
   extended: true, 
-  limit: '50mb',
-  parameterLimit: 100000
+  limit: '50mb'
 }));
 
-// Servir les fichiers statiques avec headers CORS
+// Servir les fichiers statiques
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
   setHeaders: (res, path) => {
     res.set('Access-Control-Allow-Origin', '*');
@@ -163,13 +171,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Middleware de santé avancé
+// Middleware de santé
 app.use('/health', (req, res, next) => {
   res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
   next();
 });
 
-// Routes API
+// ✅ ROUTES API
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/profile', require('./routes/profile'));
 app.use('/api/medical-files', require('./routes/medicalFile'));
@@ -179,12 +187,24 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/calendars', require('./routes/calendar'));
-app.use('/api/users', require('./routes/users')); // Nouvelle route ajoutée
+app.use('/api/users', require('./routes/users'));
 
-// Route de santé complète
+// ✅ ROUTE DE SANTÉ AMÉLIORÉE
 app.get('/health', async (req, res) => {
   try {
     const dbStatus = await testConnection();
+    
+    // ✅ HEADERS CORS EXPLICITES POUR HEALTH
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      'https://carnet-sante-frontend.onrender.com',
+      'http://localhost:3000'
+    ];
+    
+    if (allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     
     res.json({
       success: true,
@@ -202,8 +222,9 @@ app.get('/health', async (req, res) => {
         nodeVersion: process.version
       },
       cors: {
-        allowedOrigins: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
-        currentOrigin: req.headers.origin
+        allowedOrigins: allowedOrigins,
+        currentOrigin: origin,
+        status: '✅ Configuré'
       }
     });
   } catch (error) {
@@ -216,13 +237,27 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Route racine avec informations détaillées
+// ✅ ROUTE RACINE
 app.get('/', (req, res) => {
+  // Headers CORS pour la route racine
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://carnet-sante-frontend.onrender.com',
+    'http://localhost:3000'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
   res.json({
     success: true,
     message: '🏥 API Carnet de Santé Virtuel',
     version: '1.0.0',
     documentation: '/api/docs',
+    health: '/health',
+    cors_test: '/api/cors-test',
     endpoints: {
       auth: '/api/auth',
       profile: '/api/profile',
@@ -232,44 +267,50 @@ app.get('/', (req, res) => {
       admin: '/api/admin',
       search: '/api/search',
       notifications: '/api/notifications',
-      users: '/api/users' // Ajouté
-    },
-    cors: {
-      allowed: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      credentials: true
+      users: '/api/users'
     }
   });
 });
 
-// Route de test CORS
+// ✅ ROUTE DE TEST CORS
 app.get('/api/cors-test', (req, res) => {
+  const origin = req.headers.origin;
+  console.log('🧪 Test CORS - Origin:', origin);
+  
+  const allowedOrigins = [
+    'https://carnet-sante-frontend.onrender.com',
+    'http://localhost:3000'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  
   res.json({
     success: true,
     message: '✅ Test CORS réussi !',
-    origin: req.headers.origin,
+    origin: origin,
     timestamp: new Date().toISOString(),
-    headers: req.headers
+    cors: {
+      allowedOrigins: allowedOrigins,
+      currentOrigin: origin,
+      status: '✅ Autorisé'
+    }
   });
 });
 
-// Middleware pour les routes non trouvées avec CORS
-app.use('*', (req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  next();
-});
-
-// Gestion des erreurs avec CORS
+// Gestion des routes non trouvées
 app.use(notFound);
+
+// Gestion des erreurs
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000;
 
 const startServer = async () => {
   try {
     console.log('🚀 Démarrage du serveur Carnet de Santé...');
-    console.log('📁 Répertoire:', __dirname);
     
     // Tester la connexion à la base de données
     const dbConnected = await testConnection();
@@ -277,62 +318,54 @@ const startServer = async () => {
       throw new Error('❌ Impossible de se connecter à la base de données');
     }
     
-    // Synchroniser les modèles (en développement seulement)
+    // Synchroniser les modèles
     console.log('🔄 Synchronisation des modèles...');
-await sequelize.sync({ 
-  alter: false, // Ne pas modifier les tables existantes
-  force: false, // Ne JAMAIS supprimer les tables
-  logging: false
-});
-console.log('✅ Modèles synchronisés');
+    await sequelize.sync({ 
+      alter: false,
+      force: false,
+      logging: false
+    });
+    console.log('✅ Modèles synchronisés');
+    
     app.listen(PORT, '0.0.0.0', () => {
       console.log('\n🎉 SERVEUR DÉMARRÉ AVEC SUCCÈS!');
       console.log('=================================');
-      console.log(`🌍 Environnement: ${process.env.NODE_ENV}`);
-      console.log(`🔗 URL principale: http://localhost:${PORT}`);
+      console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`🔗 URL: http://localhost:${PORT}`);
       console.log(`🌐 URL réseau: http://0.0.0.0:${PORT}`);
       console.log(`❤️  Health check: http://localhost:${PORT}/health`);
       console.log(`🔧 Test CORS: http://localhost:${PORT}/api/cors-test`);
-      console.log(`📚 Documentation: http://localhost:${PORT}/api/docs`);
       console.log('\n📍 URLs autorisées CORS:');
-      const origins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
-      origins.forEach(origin => console.log(`   ✅ ${origin}`));
+      console.log('   ✅ https://carnet-sante-frontend.onrender.com');
+      console.log('   ✅ http://localhost:3000');
       console.log('=================================\n');
     });
   } catch (error) {
     console.error('❌ CRITIQUE: Impossible de démarrer le serveur:', error);
-    console.error('💡 Vérifiez:');
-    console.error('   - La base de données PostgreSQL est-elle démarrée ?');
-    console.error('   - Les variables d\'environnement sont-elles correctes ?');
-    console.error('   - Le port 5000 est-il disponible ?');
     process.exit(1);
   }
 };
 
 // Gestion gracieuse de l'arrêt
 process.on('SIGTERM', async () => {
-  console.log('\n🛑 Réception SIGTERM, arrêt gracieux du serveur...');
+  console.log('\n🛑 Arrêt gracieux du serveur...');
   await sequelize.close();
-  console.log('✅ Connexions fermées, arrêt complet.');
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Réception SIGINT (Ctrl+C), arrêt gracieux du serveur...');
+  console.log('\n🛑 Arrêt gracieux (Ctrl+C)...');
   await sequelize.close();
-  console.log('✅ Connexions fermées, arrêt complet.');
   process.exit(0);
 });
 
-// Gestion des erreurs non capturées
 process.on('uncaughtException', (error) => {
-  console.error('💥 ERREUR NON CAPTURÉE:', error);
+  console.error('💥 Erreur non capturée:', error);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('💥 PROMESSE NON GÉRÉE:', reason);
-  process.exit(1);
+  console.error('💥 Promesse non gérée:', reason);
 });
 
 // Démarrer le serveur
