@@ -3,6 +3,7 @@ require('dotenv').config();
 
 let sequelize;
 
+// Configuration adaptative : DATABASE_URL (Render) ou variables séparées (local)
 if (process.env.DATABASE_URL) {
   console.log('🌐 Mode Production - DATABASE_URL détectée');
   
@@ -49,10 +50,18 @@ const testConnection = async () => {
   try {
     await sequelize.authenticate();
     console.log('✅ Connexion PostgreSQL réussie!');
-    console.log('📊 Base:', sequelize.config.database);
+    console.log('📊 Base de données:', sequelize.config.database);
+    console.log('🔐 SSL:', sequelize.config.dialectOptions?.ssl ? 'Activé' : 'Désactivé');
     return true;
   } catch (error) {
-    console.error('❌ Erreur connexion DB:', error.message);
+    console.error('❌ Erreur de connexion à la base de données:', error.message);
+    
+    if (process.env.DATABASE_URL) {
+      console.error('💡 Vérifiez que DATABASE_URL est correcte dans les variables Render');
+    } else {
+      console.error('💡 Vérifiez que PostgreSQL local est démarré');
+    }
+    
     return false;
   }
 };
