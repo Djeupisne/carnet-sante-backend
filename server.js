@@ -13,6 +13,9 @@ const { logger } = require('./utils/logger');
 
 const app = express();
 
+// ✅ CORRIGÉ : Configuration trust proxy pour express-rate-limit
+app.set('trust proxy', 1); // Faire confiance au premier proxy
+
 // ✅ MIDDLEWARE CORS CRITIQUE - PLACÉ EN PREMIER
 app.use((req, res, next) => {
   const allowedOrigins = [
@@ -114,7 +117,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting
+// ✅ CORRIGÉ : Rate limiting avec trust proxy configuré
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: process.env.NODE_ENV === 'development' ? 1000 : 100,
@@ -123,7 +126,12 @@ const limiter = rateLimit({
     message: 'Trop de requêtes depuis cette IP, veuillez réessayer plus tard.'
   },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  // ✅ Configuration supplémentaire pour éviter l'erreur X-Forwarded-For
+  keyGenerator: (req) => {
+    // Utiliser l'IP client réelle derrière le proxy
+    return req.ip || req.connection.remoteAddress;
+  }
 });
 app.use(limiter);
 
@@ -221,6 +229,10 @@ app.get('/health', async (req, res) => {
         memory: process.memoryUsage(),
         nodeVersion: process.version
       },
+      proxy: {
+        trustProxy: '✅ Configuré (niveau 1)',
+        xForwardedFor: req.headers['x-forwarded-for'] || 'Non défini'
+      },
       cors: {
         allowedOrigins: allowedOrigins,
         currentOrigin: origin,
@@ -258,6 +270,10 @@ app.get('/', (req, res) => {
     documentation: '/api/docs',
     health: '/health',
     cors_test: '/api/cors-test',
+    proxy: {
+      status: '✅ Trust proxy configuré',
+      level: 1
+    },
     endpoints: {
       auth: '/api/auth',
       profile: '/api/profile',
@@ -292,6 +308,10 @@ app.get('/api/cors-test', (req, res) => {
     message: '✅ Test CORS réussi !',
     origin: origin,
     timestamp: new Date().toISOString(),
+    proxy: {
+      trustProxy: '✅ Configuré',
+      xForwardedFor: req.headers['x-forwarded-for'] || 'Non défini'
+    },
     cors: {
       allowedOrigins: allowedOrigins,
       currentOrigin: origin,
@@ -335,6 +355,7 @@ const startServer = async () => {
       console.log(`🌐 URL réseau: http://0.0.0.0:${PORT}`);
       console.log(`❤️  Health check: http://localhost:${PORT}/health`);
       console.log(`🔧 Test CORS: http://localhost:${PORT}/api/cors-test`);
+      console.log(`🛡️  Trust proxy: ✅ Configuré (niveau 1)`);
       console.log('\n📍 URLs autorisées CORS:');
       console.log('   ✅ https://carnet-sante-frontend.onrender.com');
       console.log('   ✅ http://localhost:3000');
