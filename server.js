@@ -278,16 +278,13 @@ const startServer = async () => {
     }
     
     // Synchroniser les modèles (en développement seulement)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔄 Synchronisation des modèles de base de données...');
-      await sequelize.sync({ 
-        alter: false,
-        force: false,
-        logging: console.log
-      });
-      console.log('✅ Modèles de base de données synchronisés');
-    }
-
+    console.log('🔄 Synchronisation des modèles...');
+await sequelize.sync({ 
+  alter: false, // Ne pas modifier les tables existantes
+  force: false, // Ne JAMAIS supprimer les tables
+  logging: false
+});
+console.log('✅ Modèles synchronisés');
     app.listen(PORT, '0.0.0.0', () => {
       console.log('\n🎉 SERVEUR DÉMARRÉ AVEC SUCCÈS!');
       console.log('=================================');
