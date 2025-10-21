@@ -59,11 +59,11 @@ const User = sequelize.define('User', {
   },
   dateOfBirth: {
     type: DataTypes.DATEONLY,
-    allowNull: false
+    allowNull: true // ✅ CHANGÉ: Optionnel maintenant
   },
   gender: {
     type: DataTypes.ENUM('male', 'female', 'other'),
-    allowNull: false
+    allowNull: true // ✅ CHANGÉ: Optionnel maintenant
   },
   phoneNumber: {
     type: DataTypes.STRING,
@@ -96,7 +96,7 @@ const User = sequelize.define('User', {
   languages: {
     type: DataTypes.JSONB,
     defaultValue: [],
-    allowNull: true // Ajout de allowNull: true pour permettre les valeurs nulles
+    allowNull: true
   },
   consultationPrice: {
     type: DataTypes.DECIMAL(10, 2),
@@ -188,7 +188,7 @@ const User = sequelize.define('User', {
   hooks: {
     beforeCreate: async (user) => {
       try {
-        console.log('Hook beforeCreate - Hachage du mot de passe pour:', user.email);
+        console.log('Hook beforeCreate - User:', user.email, 'Role:', user.role);
         
         // Générer le code unique si manquant
         if (!user.uniqueCode) {
@@ -204,26 +204,30 @@ const User = sequelize.define('User', {
 
         // Gérer les champs selon le rôle
         if (user.role === 'patient') {
-          // Pour les patients, s'assurer que les champs médecins sont null
+          // Pour les patients, nettoyer les champs médecins
           user.specialty = null;
           user.licenseNumber = null;
           user.biography = null;
           user.languages = null;
           user.consultationPrice = 0.00;
+          console.log('Champs patient nettoyés');
         } else if (user.role === 'doctor') {
-          // Pour les médecins, s'assurer que languages est un tableau vide si null
-          if (!user.languages) {
+          // Pour les médecins, s'assurer que languages est un tableau
+          if (!user.languages || !Array.isArray(user.languages)) {
             user.languages = [];
           }
+          console.log('Champs doctor initialisés');
         }
 
-        // S'assurer que bloodType est null si vide
-        if (user.bloodType === '') {
+        // Nettoyer bloodType si vide
+        if (user.bloodType === '' || user.bloodType === null) {
           user.bloodType = null;
         }
 
+        console.log('✅ Hooks beforeCreate terminés avec succès');
+
       } catch (error) {
-        console.error('Erreur dans beforeCreate:', error);
+        console.error('❌ Erreur dans beforeCreate:', error);
         throw error;
       }
     },
@@ -231,9 +235,8 @@ const User = sequelize.define('User', {
     beforeUpdate: async (user) => {
       try {
         if (user.changed('password')) {
-          console.log('Hook beforeUpdate - Hachage du nouveau mot de passe pour:', user.email);
+          console.log('Hook beforeUpdate - Hachage du nouveau mot de passe');
           user.password = await bcrypt.hash(user.password, 12);
-          console.log('Nouveau mot de passe hashé avec succès');
         }
 
         // Gérer les champs selon le rôle lors de la mise à jour
@@ -245,19 +248,19 @@ const User = sequelize.define('User', {
             user.languages = null;
             user.consultationPrice = 0.00;
           } else if (user.role === 'doctor') {
-            if (!user.languages) {
+            if (!user.languages || !Array.isArray(user.languages)) {
               user.languages = [];
             }
           }
         }
 
-        // S'assurer que bloodType est null si vide
-        if (user.changed('bloodType') && user.bloodType === '') {
+        // Nettoyer bloodType si vide
+        if (user.changed('bloodType') && (user.bloodType === '' || user.bloodType === null)) {
           user.bloodType = null;
         }
 
       } catch (error) {
-        console.error('Erreur dans beforeUpdate:', error);
+        console.error('❌ Erreur dans beforeUpdate:', error);
         throw error;
       }
     }
@@ -274,7 +277,7 @@ User.prototype.comparePassword = async function(candidatePassword) {
     }
     return await bcrypt.compare(candidatePassword, this.password);
   } catch (error) {
-    console.error('Erreur lors de la comparaison du mot de passe:', error);
+    console.error('❌ Erreur lors de la comparaison du mot de passe:', error);
     return false;
   }
 };
@@ -308,7 +311,7 @@ User.prototype.incLoginAttempts = async function() {
     // Verrouiller après 5 tentatives échouées
     if (attempts >= 5) {
       lockUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-      console.log('Compte verrouillé après 5 tentatives échouées');
+      console.log('⚠️ Compte verrouillé après 5 tentatives échouées');
     }
     
     return await this.update({
@@ -316,9 +319,19 @@ User.prototype.incLoginAttempts = async function() {
       lockUntil
     });
   } catch (error) {
-    console.error('Erreur lors de l\'incrémentation des tentatives:', error);
+    console.error('❌ Erreur lors de l\'incrémentation des tentatives:', error);
     throw error;
   }
+};
+
+/**
+ * Méthode pour réinitialiser les tentatives de connexion
+ */
+User.prototype.resetLoginAttempts = async function() {
+  return await this.update({
+    loginAttempts: 0,
+    lockUntil: null
+  });
 };
 
 module.exports = User;
