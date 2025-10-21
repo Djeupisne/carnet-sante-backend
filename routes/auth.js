@@ -13,8 +13,8 @@ const registerValidation = [
   body('lastName').notEmpty().trim().withMessage('Nom requis'),
   body('dateOfBirth').isDate().withMessage('Date de naissance invalide'),
   body('gender').isIn(['male', 'female', 'other']).withMessage('Genre invalide'),
-  body('phoneNumber').optional().isMobilePhone().withMessage('Numéro de téléphone invalide'),
-  body('bloodType').optional().isIn(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).withMessage('Groupe sanguin invalide'), // ✅ AJOUT
+  body('phoneNumber').optional().matches(/^\+?[\d\s\-\(\)]{10,}$/).withMessage('Numéro de téléphone invalide'), // ✅ CORRIGÉ
+  body('bloodType').optional().isIn(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']).withMessage('Groupe sanguin invalide'),
   body('role').optional().isIn(['patient', 'doctor']).withMessage('Rôle invalide')
 ];
 
