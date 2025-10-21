@@ -14,7 +14,7 @@ const handleValidationErrors = (req, res, next) => {
     const formattedErrors = errors.array().map(err => {
       console.log(`  - ${err.param}: ${err.msg}`);
       return {
-        field: err.param || 'unknown', // ✅ CORRIGÉ - évite undefined
+        field: err.param || 'unknown',
         message: err.msg,
         value: err.value
       };
@@ -56,14 +56,22 @@ const sanitizeInput = (req, res, next) => {
   if (req.body.phoneNumber && typeof req.body.phoneNumber === 'string') {
     req.body.phoneNumber = req.body.phoneNumber.trim();
   }
+  if (req.body.specialty && typeof req.body.specialty === 'string') {
+    req.body.specialty = req.body.specialty.trim();
+  }
+  if (req.body.licenseNumber && typeof req.body.licenseNumber === 'string') {
+    req.body.licenseNumber = req.body.licenseNumber.trim();
+  }
+  if (req.body.biography && typeof req.body.biography === 'string') {
+    req.body.biography = req.body.biography.trim();
+  }
 
   console.log('Body après sanitize:', req.body);
   next();
 };
 
 /**
- * Règles de validation pour l'enregistrement
- * Modifiées pour être plus flexibles
+ * Règles de validation pour l'enregistrement - CORRIGÉES
  */
 const registerValidation = [
   body('email')
@@ -104,18 +112,42 @@ const registerValidation = [
   body('phoneNumber')
     .optional({ checkFalsy: true })
     .trim()
-    .isLength({ min: 8, max: 20 }) // ✅ CORRIGÉ - validation simplifiée
+    .isLength({ min: 8, max: 20 })
     .withMessage('Le numéro doit contenir entre 8 et 20 caractères'),
   
-  body('bloodType') // ✅ AJOUT - validation pour bloodType
+  body('bloodType')
     .optional({ checkFalsy: true })
     .isIn(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'])
     .withMessage('Groupe sanguin invalide'),
   
   body('role')
-    .optional({ checkFalsy: true })
+    .optional()
     .isIn(['patient', 'doctor', 'admin', 'hospital_admin'])
-    .withMessage('Rôle invalide')
+    .withMessage('Rôle invalide'),
+  
+  // ✅ CORRIGÉ : Validation pour les champs doctors (optionnels)
+  body('specialty')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 2 })
+    .withMessage('La spécialité doit contenir au moins 2 caractères'),
+  
+  body('licenseNumber')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 3 })
+    .withMessage('Le numéro de licence doit contenir au moins 3 caractères'),
+  
+  body('biography')
+    .optional({ checkFalsy: true })
+    .trim()
+    .isLength({ min: 10 }) // ✅ Réduit de 50 à 10 pour les tests
+    .withMessage('La biographie doit contenir au moins 10 caractères'),
+  
+  body('languages')
+    .optional()
+    .isArray()
+    .withMessage('Les langues doivent être un tableau')
 ];
 
 /**

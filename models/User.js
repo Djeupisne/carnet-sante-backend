@@ -59,11 +59,11 @@ const User = sequelize.define('User', {
   },
   dateOfBirth: {
     type: DataTypes.DATEONLY,
-    allowNull: true // ✅ CHANGÉ: Optionnel maintenant
+    allowNull: true
   },
   gender: {
     type: DataTypes.ENUM('male', 'female', 'other'),
-    allowNull: true // ✅ CHANGÉ: Optionnel maintenant
+    allowNull: true
   },
   phoneNumber: {
     type: DataTypes.STRING,
@@ -202,16 +202,12 @@ const User = sequelize.define('User', {
           console.log('Mot de passe hashé avec succès');
         }
 
-        // Gérer les champs selon le rôle
-        if (user.role === 'patient') {
-          // Pour les patients, nettoyer les champs médecins
-          user.specialty = null;
-          user.licenseNumber = null;
-          user.biography = null;
-          user.languages = null;
-          user.consultationPrice = 0.00;
-          console.log('Champs patient nettoyés');
-        } else if (user.role === 'doctor') {
+        // ✅ CORRIGÉ : Supprimer la logique de nettoyage agressive
+        // La validation Express s'occupe déjà de la validation
+        // Ne pas forcer les champs à null
+
+        // Gérer seulement les conversions nécessaires
+        if (user.role === 'doctor') {
           // Pour les médecins, s'assurer que languages est un tableau
           if (!user.languages || !Array.isArray(user.languages)) {
             user.languages = [];
@@ -239,9 +235,10 @@ const User = sequelize.define('User', {
           user.password = await bcrypt.hash(user.password, 12);
         }
 
-        // Gérer les champs selon le rôle lors de la mise à jour
+        // ✅ CORRIGÉ : Logique de nettoyage simplifiée
         if (user.changed('role')) {
           if (user.role === 'patient') {
+            // Nettoyer seulement si explicitement changé en patient
             user.specialty = null;
             user.licenseNumber = null;
             user.biography = null;

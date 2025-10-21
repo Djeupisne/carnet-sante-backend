@@ -13,12 +13,28 @@ const generateToken = (userId) => {
 };
 
 /**
- * POST /api/auth/register
+ * POST /api/auth/register - CORRIGÉ
  */
 const register = async (req, res) => {
   try {
     console.log('\n📝 === REGISTER CONTROLLER ===');
-    const { email, password, firstName, lastName, dateOfBirth, gender, phoneNumber, role } = req.body;
+    
+    // ✅ CORRIGÉ : Récupérer TOUS les champs
+    const { 
+      email, 
+      password, 
+      firstName, 
+      lastName, 
+      dateOfBirth, 
+      gender, 
+      phoneNumber, 
+      role,
+      bloodType,        // ✅ AJOUT
+      specialty,        // ✅ AJOUT
+      licenseNumber,    // ✅ AJOUT
+      biography,        // ✅ AJOUT
+      languages         // ✅ AJOUT
+    } = req.body;
 
     console.log('Données reçues:', {
       email,
@@ -26,7 +42,12 @@ const register = async (req, res) => {
       lastName,
       dateOfBirth,
       gender,
-      role: role || 'patient'
+      role: role || 'patient',
+      bloodType,        // ✅ AJOUT
+      specialty,        // ✅ AJOUT
+      licenseNumber,    // ✅ AJOUT
+      biography: biography ? `${biography.substring(0, 50)}...` : null, // ✅ AJOUT
+      languages         // ✅ AJOUT
     });
 
     // Validation basique avant la création
@@ -65,9 +86,9 @@ const register = async (req, res) => {
     // Hacher le mot de passe
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Créer l'utilisateur
+    // ✅ CORRIGÉ : Créer l'utilisateur avec TOUS les champs
     console.log('Création de l\'utilisateur...');
-    const user = await User.create({
+    const userData = {
       email: email.toLowerCase(),
       password: hashedPassword,
       firstName: firstName.trim(),
@@ -76,15 +97,27 @@ const register = async (req, res) => {
       gender,
       phoneNumber: phoneNumber || null,
       role: role || 'patient',
+      bloodType: bloodType || null,        // ✅ AJOUT
+      specialty: specialty || null,        // ✅ AJOUT
+      licenseNumber: licenseNumber || null,// ✅ AJOUT
+      biography: biography || null,        // ✅ AJOUT
+      languages: languages || null,        // ✅ AJOUT
       isActive: true,
       isVerified: false,
       profileCompleted: false
-    });
+    };
+
+    console.log('Données utilisateur pour création:', userData);
+
+    const user = await User.create(userData);
 
     console.log('Utilisateur créé:', { 
       id: user.id, 
       email: user.email,
-      uniqueCode: user.uniqueCode 
+      uniqueCode: user.uniqueCode,
+      role: user.role,
+      bloodType: user.bloodType,    // ✅ AJOUT
+      specialty: user.specialty     // ✅ AJOUT
     });
 
     // Générer le token
@@ -102,7 +135,9 @@ const register = async (req, res) => {
         details: {
           email: user.email,
           role: user.role,
-          uniqueCode: user.uniqueCode
+          uniqueCode: user.uniqueCode,
+          bloodType: user.bloodType,  // ✅ AJOUT
+          specialty: user.specialty   // ✅ AJOUT
         }
       });
       console.log('Log d\'audit créé');
@@ -118,6 +153,7 @@ const register = async (req, res) => {
 
     console.log('✓ Enregistrement réussi\n');
 
+    // ✅ CORRIGÉ : Retourner tous les champs dans la réponse
     res.status(201).json({
       success: true,
       message: 'Utilisateur créé avec succès',
@@ -132,6 +168,11 @@ const register = async (req, res) => {
           gender: user.gender,
           dateOfBirth: user.dateOfBirth,
           phoneNumber: user.phoneNumber,
+          bloodType: user.bloodType,        // ✅ AJOUT
+          specialty: user.specialty,        // ✅ AJOUT
+          licenseNumber: user.licenseNumber,// ✅ AJOUT
+          biography: user.biography,        // ✅ AJOUT
+          languages: user.languages,        // ✅ AJOUT
           isVerified: user.isVerified
         },
         token
@@ -142,9 +183,13 @@ const register = async (req, res) => {
     console.error('\n❌ Erreur enregistrement:', error.message);
     console.error('Stack:', error.stack);
     
+    // ✅ AMÉLIORÉ : Meilleur logging des erreurs
+    console.error('Données reçues qui ont causé l\'erreur:', req.body);
+    
     logger.error('Erreur d\'enregistrement', {
       error: error.message,
-      email: req.body.email
+      email: req.body.email,
+      role: req.body.role
     });
 
     // Erreurs Sequelize
@@ -153,6 +198,7 @@ const register = async (req, res) => {
         field: err.path,
         message: err.message
       }));
+      console.error('Erreurs de validation Sequelize:', messages);
       return res.status(400).json({
         success: false,
         message: 'Erreur de validation',
@@ -161,10 +207,21 @@ const register = async (req, res) => {
     }
 
     if (error.name === 'SequelizeUniqueConstraintError') {
+      console.error('Erreur de contrainte unique:', error.errors);
       return res.status(409).json({
         success: false,
         message: 'Cette valeur est déjà utilisée',
         field: error.errors[0].path
+      });
+    }
+
+    // ✅ AJOUT : Gestion des erreurs de type de données
+    if (error.name === 'SequelizeDatabaseError') {
+      console.error('Erreur de base de données:', error.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Erreur de format de données',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }
 
