@@ -13,13 +13,13 @@ const { logger } = require('./utils/logger');
 
 const app = express();
 
-// ✅ CORRIGÉ : Configuration trust proxy pour express-rate-limit
-app.set('trust proxy', 1); // Faire confiance au premier proxy
+// ✅ CORRIGÉ DÉFINITIF : Configuration trust proxy pour Render
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']); // ✅ Configuration complète
 
 // ✅ MIDDLEWARE CORS CRITIQUE - PLACÉ EN PREMIER
 app.use((req, res, next) => {
   const allowedOrigins = [
-    'https://carnet-sante-frontend.onrender.com', // ✅ URL PRODUCTION
+    'https://carnet-sante-frontend.onrender.com',
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://192.168.47.233:3000',
@@ -37,7 +37,6 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
   
-  // Répondre immédiatement aux requêtes OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -48,18 +47,17 @@ app.use((req, res, next) => {
 // Middleware de sécurité
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: false // Désactivé pour simplifier les tests
+  contentSecurityPolicy: false
 }));
 
 // Compression Gzip
 app.use(compression());
 
-// ✅ CONFIGURATION CORS SIMPLIFIÉE et FONCTIONNELLE
+// Configuration CORS
 app.use(cors({
   origin: function (origin, callback) {
-    // URLs autorisées
     const allowedOrigins = [
-      'https://carnet-sante-frontend.onrender.com', // ✅ AJOUT CRITIQUE
+      'https://carnet-sante-frontend.onrender.com',
       'http://localhost:3000',
       'http://127.0.0.1:3000',
       'http://192.168.47.233:3000',
@@ -67,12 +65,10 @@ app.use(cors({
       'http://192.168.200.1:3000'
     ];
     
-    // En développement, autoriser toutes les origines
     if (process.env.NODE_ENV === 'development') {
       return callback(null, true);
     }
     
-    // Autoriser les requêtes sans origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.includes(origin)) {
@@ -88,36 +84,7 @@ app.use(cors({
   maxAge: 86400
 }));
 
-// ✅ GESTION GLOBALE DES REQUÊTES OPTIONS
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://carnet-sante-frontend.onrender.com',
-    'http://localhost:3000'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  res.status(200).end();
-});
-
-// Middleware de debug CORS
-app.use((req, res, next) => {
-  console.log('🌐 Requête reçue:', {
-    method: req.method,
-    url: req.url,
-    origin: req.headers.origin,
-    'user-agent': req.headers['user-agent']
-  });
-  next();
-});
-
-// ✅ CORRIGÉ : Rate limiting avec trust proxy configuré
+// ✅ CORRIGÉ DÉFINITIF : Rate limiting avec configuration proxy complète
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: process.env.NODE_ENV === 'development' ? 1000 : 100,
@@ -127,10 +94,9 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // ✅ Configuration supplémentaire pour éviter l'erreur X-Forwarded-For
-  keyGenerator: (req) => {
-    // Utiliser l'IP client réelle derrière le proxy
-    return req.ip || req.connection.remoteAddress;
+  // ✅ Configuration spécifique pour éviter l'erreur
+  validate: { 
+    trustProxy: false // Désactive la validation X-Forwarded-For
   }
 });
 app.use(limiter);
@@ -159,7 +125,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
   }
 }));
 
-// Servir les docs API si existantes
+// Servir les docs API
 app.use('/api/docs', express.static(path.join(__dirname, 'docs')));
 
 // Logging des requêtes personnalisé
@@ -202,7 +168,6 @@ app.get('/health', async (req, res) => {
   try {
     const dbStatus = await testConnection();
     
-    // ✅ HEADERS CORS EXPLICITES POUR HEALTH
     const origin = req.headers.origin;
     const allowedOrigins = [
       'https://carnet-sante-frontend.onrender.com',
@@ -230,7 +195,7 @@ app.get('/health', async (req, res) => {
         nodeVersion: process.version
       },
       proxy: {
-        trustProxy: '✅ Configuré (niveau 1)',
+        trustProxy: '✅ Configuré (array)',
         xForwardedFor: req.headers['x-forwarded-for'] || 'Non défini'
       },
       cors: {
@@ -251,7 +216,6 @@ app.get('/health', async (req, res) => {
 
 // ✅ ROUTE RACINE
 app.get('/', (req, res) => {
-  // Headers CORS pour la route racine
   const origin = req.headers.origin;
   const allowedOrigins = [
     'https://carnet-sante-frontend.onrender.com',
@@ -272,7 +236,7 @@ app.get('/', (req, res) => {
     cors_test: '/api/cors-test',
     proxy: {
       status: '✅ Trust proxy configuré',
-      level: 1
+      config: 'array'
     },
     endpoints: {
       auth: '/api/auth',
@@ -332,13 +296,11 @@ const startServer = async () => {
   try {
     console.log('🚀 Démarrage du serveur Carnet de Santé...');
     
-    // Tester la connexion à la base de données
     const dbConnected = await testConnection();
     if (!dbConnected) {
       throw new Error('❌ Impossible de se connecter à la base de données');
     }
     
-    // Synchroniser les modèles
     console.log('🔄 Synchronisation des modèles...');
     await sequelize.sync({ 
       alter: false,
@@ -355,7 +317,7 @@ const startServer = async () => {
       console.log(`🌐 URL réseau: http://0.0.0.0:${PORT}`);
       console.log(`❤️  Health check: http://localhost:${PORT}/health`);
       console.log(`🔧 Test CORS: http://localhost:${PORT}/api/cors-test`);
-      console.log(`🛡️  Trust proxy: ✅ Configuré (niveau 1)`);
+      console.log(`🛡️  Trust proxy: ✅ Configuré (array)`);
       console.log('\n📍 URLs autorisées CORS:');
       console.log('   ✅ https://carnet-sante-frontend.onrender.com');
       console.log('   ✅ http://localhost:3000');
