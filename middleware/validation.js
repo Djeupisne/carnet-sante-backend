@@ -14,7 +14,7 @@ const handleValidationErrors = (req, res, next) => {
     const formattedErrors = errors.array().map(err => {
       console.log(`  - ${err.param}: ${err.msg}`);
       return {
-        field: err.param,
+        field: err.param || 'unknown', // ✅ CORRIGÉ - évite undefined
         message: err.msg,
         value: err.value
       };
@@ -104,8 +104,13 @@ const registerValidation = [
   body('phoneNumber')
     .optional({ checkFalsy: true })
     .trim()
-    .matches(/^\+?[\d\s\-\(\)]{10,}$/)
-    .withMessage('Format de numéro de téléphone invalide'),
+    .isLength({ min: 8, max: 20 }) // ✅ CORRIGÉ - validation simplifiée
+    .withMessage('Le numéro doit contenir entre 8 et 20 caractères'),
+  
+  body('bloodType') // ✅ AJOUT - validation pour bloodType
+    .optional({ checkFalsy: true })
+    .isIn(['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'])
+    .withMessage('Groupe sanguin invalide'),
   
   body('role')
     .optional({ checkFalsy: true })
