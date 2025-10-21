@@ -71,7 +71,7 @@ const sanitizeInput = (req, res, next) => {
 };
 
 /**
- * Règles de validation pour l'enregistrement - CORRIGÉES
+ * Règles de validation pour l'enregistrement - CORRIGÉES DÉFINITIVEMENT
  */
 const registerValidation = [
   body('email')
@@ -109,12 +109,12 @@ const registerValidation = [
     .isIn(['male', 'female', 'other'])
     .withMessage('Genre invalide (male, female, other)'),
   
-  // ✅ CORRIGÉ : Validation du téléphone plus flexible
+  // ✅ CORRIGÉ DÉFINITIF : Validation téléphone ULTRA FLEXIBLE
   body('phoneNumber')
     .optional({ checkFalsy: true })
     .trim()
-    .matches(/^\+?[\d\s\-\(\)]{8,20}$/) // Accepte +22893360150
-    .withMessage('Format de numéro de téléphone invalide'),
+    .matches(/^\+?[0-9\s\-\(\)\.]{8,20}$/) // ✅ Accepte +22893360150 et tous formats internationaux
+    .withMessage('Format de numéro de téléphone invalide. Ex: +22893360150 ou 093360150'),
   
   body('bloodType')
     .optional({ checkFalsy: true })
