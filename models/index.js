@@ -16,12 +16,12 @@ User.hasMany(Appointment, { foreignKey: 'doctorId', as: 'doctorAppointments' });
 Appointment.belongsTo(User, { foreignKey: 'patientId', as: 'appointmentPatient' });
 Appointment.belongsTo(User, { foreignKey: 'doctorId', as: 'appointmentDoctor' });
 
-Appointment.hasOne(Payment, { foreignKey: 'appointmentId', as: 'payment' });
+Appointment.hasOne(Payment, { foreignKey: 'appointmentId', as: 'appointmentPayment' });
 Payment.belongsTo(Appointment, { foreignKey: 'appointmentId', as: 'paymentAppointment' });
 Payment.belongsTo(User, { foreignKey: 'patientId', as: 'paymentPatient' });
 Payment.belongsTo(User, { foreignKey: 'doctorId', as: 'paymentDoctor' });
 
-User.hasMany(Notification, { foreignKey: 'userId', as: 'notifications' });
+User.hasMany(Notification, { foreignKey: 'userId', as: 'userNotifications' });
 Notification.belongsTo(User, { foreignKey: 'userId', as: 'notificationUser' });
 
 User.hasMany(Review, { foreignKey: 'patientId', as: 'patientReviews' });
