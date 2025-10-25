@@ -1,22 +1,16 @@
 const express = require('express');
 const router = express.Router();
 
-// Importer toutes les routes
+// Import des routes
 const authRoutes = require('./auth');
-const profileRoutes = require('./profile');
-const medicalFileRoutes = require('./medicalFile');
-const appointmentRoutes = require('./appointment');
-const paymentRoutes = require('./payment');
-const adminRoutes = require('./admin');
-const searchRoutes = require('./search');
+const userRoutes = require('./users');
+const appointmentRoutes = require('./appointments');
+const doctorRoutes = require('./doctors');
 
-// Utiliser les routes
+// Utilisation des routes
 router.use('/auth', authRoutes);
-router.use('/profile', profileRoutes);
-router.use('/medical-files', medicalFileRoutes);
+router.use('/users', userRoutes);
 router.use('/appointments', appointmentRoutes);
-router.use('/payments', paymentRoutes);
-router.use('/admin', adminRoutes);
-router.use('/search', searchRoutes);
+router.use('/doctors', doctorRoutes);
 
 module.exports = router;

@@ -1,5 +1,6 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
+const { User } = require('./User');
 
 const Appointment = sequelize.define('Appointment', {
   id: {
@@ -44,7 +45,8 @@ const Appointment = sequelize.define('Appointment', {
     allowNull: false
   },
   symptoms: {
-    type: DataTypes.JSONB
+    type: DataTypes.JSONB,
+    defaultValue: {}
   },
   meetingLink: {
     type: DataTypes.STRING
@@ -73,6 +75,7 @@ const Appointment = sequelize.define('Appointment', {
     type: DataTypes.TEXT
   }
 }, {
+  tableName: 'Appointments',
   indexes: [
     {
       fields: ['patientId', 'appointmentDate']
@@ -82,8 +85,32 @@ const Appointment = sequelize.define('Appointment', {
     },
     {
       fields: ['status']
+    },
+    {
+      fields: ['appointmentDate']
     }
   ]
+});
+
+// Définir les associations
+Appointment.belongsTo(User, { 
+  as: 'patient', 
+  foreignKey: 'patientId' 
+});
+
+Appointment.belongsTo(User, { 
+  as: 'doctor', 
+  foreignKey: 'doctorId' 
+});
+
+User.hasMany(Appointment, { 
+  as: 'patientAppointments', 
+  foreignKey: 'patientId' 
+});
+
+User.hasMany(Appointment, { 
+  as: 'doctorAppointments', 
+  foreignKey: 'doctorId' 
 });
 
 module.exports = Appointment;
