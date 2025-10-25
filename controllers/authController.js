@@ -1,8 +1,10 @@
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { User, AuditLog } = require('../models');
 const { logger } = require('../utils/logger');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
+const { Op } = require('sequelize');
 
 const generateToken = (userId) => {
   return jwt.sign(
@@ -13,7 +15,8 @@ const generateToken = (userId) => {
 };
 
 /**
- * POST /api/auth/register - CORRIGÉ DÉFINITIF
+ * POST /api/auth/register
+ * ✅ CORRIGÉ : Le mot de passe n'est PAS hashé ici, le hook beforeCreate s'en charge
  */
 const register = async (req, res) => {
   try {
@@ -83,16 +86,14 @@ const register = async (req, res) => {
     }
     console.log('Email disponible');
 
-    // ✅ CORRIGÉ : Hacher le mot de passe AVANT la création
-    console.log('Hachage du mot de passe...');
-    const hashedPassword = await bcrypt.hash(password, 12); // ✅ 12 tours de sel
-    console.log('Mot de passe hashé avec succès');
+    // ✅ CORRIGÉ : NE PAS hacher le mot de passe ici
+    // Le hook beforeCreate s'en charge automatiquement
 
-    // Créer l'utilisateur avec le mot de passe HACHÉ
+    // Créer l'utilisateur avec le mot de passe EN CLAIR
     console.log('Création de l\'utilisateur...');
     const userData = {
       email: email.toLowerCase(),
-      password: hashedPassword, // ✅ Utiliser le mot de passe hashé
+      password, // ✅ Mot de passe en CLAIR (le hook le hashera)
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       dateOfBirth,
@@ -111,7 +112,7 @@ const register = async (req, res) => {
 
     console.log('Données utilisateur pour création (sans password):', {
       ...userData,
-      password: '*** HASHED ***' // Ne pas logger le mot de passe
+      password: '*** SERA HASHÉ PAR LE HOOK ***'
     });
 
     const user = await User.create(userData);
@@ -173,7 +174,8 @@ const register = async (req, res) => {
           licenseNumber: user.licenseNumber,
           biography: user.biography,
           languages: user.languages,
-          isVerified: user.isVerified
+          isVerified: user.isVerified,
+          profileCompleted: user.profileCompleted
         },
         token
       }
@@ -221,7 +223,8 @@ const register = async (req, res) => {
 };
 
 /**
- * POST /api/auth/login - CORRIGÉ
+ * POST /api/auth/login
+ * ✅ CORRIGÉ : Utilise la méthode comparePassword du modèle
  */
 const login = async (req, res) => {
   try {
@@ -242,8 +245,7 @@ const login = async (req, res) => {
     // Trouver l'utilisateur
     console.log('Recherche de l\'utilisateur...');
     const user = await User.findOne({ 
-      where: { email: email.toLowerCase() },
-      raw: false
+      where: { email: email.toLowerCase() }
     });
 
     if (!user) {
@@ -266,26 +268,15 @@ const login = async (req, res) => {
       });
     }
 
-    // ✅ CORRIGÉ : Vérifier le mot de passe avec bcrypt DIRECTEMENT
+    // ✅ Vérifier le mot de passe avec la méthode du modèle
     console.log('Vérification du mot de passe...');
-    
-    let isPasswordValid = false;
-    try {
-      // Utiliser bcrypt.compare directement au lieu de user.comparePassword
-      isPasswordValid = await bcrypt.compare(password, user.password);
-      console.log('Résultat bcrypt.compare:', isPasswordValid);
-    } catch (compareError) {
-      console.error('Erreur lors de la comparaison bcrypt:', compareError.message);
-      return res.status(500).json({
-        success: false,
-        message: 'Erreur lors de la vérification du mot de passe'
-      });
-    }
+    const isPasswordValid = await user.comparePassword(password);
+    console.log('Résultat comparePassword:', isPasswordValid);
 
     if (!isPasswordValid) {
       console.log('Mot de passe incorrect');
       
-      // Incrémenter les tentatives si la méthode existe
+      // Incrémenter les tentatives
       if (user.incLoginAttempts) {
         try {
           await user.incLoginAttempts();
@@ -308,14 +299,12 @@ const login = async (req, res) => {
     if (user.resetLoginAttempts) {
       await user.resetLoginAttempts();
     } else {
-      // Fallback si la méthode n'existe pas
       await user.update({
         loginAttempts: 0,
         lockUntil: null,
         lastLogin: new Date()
       });
     }
-
     console.log('Tentatives réinitialisées');
 
     // Générer le token
@@ -331,6 +320,7 @@ const login = async (req, res) => {
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
+      console.log('Log d\'audit créé');
     } catch (auditError) {
       console.warn('Erreur non-bloquante du log d\'audit:', auditError.message);
     }
@@ -353,7 +343,8 @@ const login = async (req, res) => {
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
-          isVerified: user.isVerified
+          isVerified: user.isVerified,
+          profileCompleted: user.profileCompleted
         },
         token
       }
@@ -403,7 +394,6 @@ const forgotPassword = async (req, res) => {
     }
 
     // Générer un token de réinitialisation
-    const crypto = require('crypto');
     const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenExpiry = Date.now() + 3600000; // 1 heure
 
@@ -415,22 +405,39 @@ const forgotPassword = async (req, res) => {
     console.log('Token de réinitialisation généré');
 
     // Envoyer un email avec nodemailer
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      try {
+        const transporter = nodemailer.createTransport({
+          service: 'gmail',
+          auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+          },
+        });
 
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: user.email,
-      subject: 'Réinitialisation de votre mot de passe',
-      text: `Utilisez ce lien pour réinitialiser votre mot de passe : http://localhost:3000/reset-password?token=${resetToken}`,
-    });
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: user.email,
+          subject: 'Réinitialisation de votre mot de passe',
+          html: `
+            <h2>Réinitialisation de mot de passe</h2>
+            <p>Vous avez demandé la réinitialisation de votre mot de passe.</p>
+            <p>Cliquez sur le lien ci-dessous pour réinitialiser votre mot de passe :</p>
+            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${resetToken}">
+              Réinitialiser mon mot de passe
+            </a>
+            <p>Ce lien expire dans 1 heure.</p>
+            <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
+          `,
+        });
 
-    console.log('Email de réinitialisation envoyé');
+        console.log('Email de réinitialisation envoyé');
+      } catch (emailError) {
+        console.error('Erreur d\'envoi d\'email:', emailError.message);
+      }
+    } else {
+      console.log('Configuration email manquante, token généré mais email non envoyé');
+    }
 
     res.json({
       success: true,
@@ -452,6 +459,7 @@ const forgotPassword = async (req, res) => {
 
 /**
  * POST /api/auth/reset-password
+ * ✅ CORRIGÉ : Utilise { hooks: false } pour éviter le double hashage
  */
 const resetPassword = async (req, res) => {
   try {
@@ -465,7 +473,6 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    const { Op } = require('sequelize');
     const user = await User.findOne({
       where: {
         resetToken: token,
@@ -482,16 +489,21 @@ const resetPassword = async (req, res) => {
     }
 
     // Hacher le nouveau mot de passe
+    console.log('Hachage du nouveau mot de passe...');
     const hashedPassword = await bcrypt.hash(password, 12);
+    console.log('Mot de passe hashé');
 
-    // Mettre à jour le mot de passe
+    // ✅ Mettre à jour avec { hooks: false } pour éviter le double hashage
     await user.update({
       password: hashedPassword,
       resetToken: null,
       resetTokenExpiry: null,
       loginAttempts: 0,
-      lockUntil: null
-    });
+      lockUntil: null,
+      lastPasswordChange: new Date()
+    }, { hooks: false }); // ✅ Important : skip le hook beforeUpdate
+
+    console.log('Mot de passe réinitialisé');
 
     // Log d'audit
     try {
@@ -501,11 +513,12 @@ const resetPassword = async (req, res) => {
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
+      console.log('Log d\'audit créé');
     } catch (auditError) {
       console.warn('Erreur non-bloquante du log d\'audit:', auditError.message);
     }
 
-    console.log('Mot de passe réinitialisé\n');
+    console.log('✓ Réinitialisation réussie\n');
 
     res.json({
       success: true,
@@ -544,16 +557,25 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
+    console.log('Utilisateur récupéré:', user.email);
+
     res.json({
       success: true,
       data: {
         user: {
           id: user.id,
+          uniqueCode: user.uniqueCode,
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
-          isVerified: user.isVerified
+          gender: user.gender,
+          dateOfBirth: user.dateOfBirth,
+          phoneNumber: user.phoneNumber,
+          bloodType: user.bloodType,
+          isVerified: user.isVerified,
+          profileCompleted: user.profileCompleted,
+          profilePicture: user.profilePicture
         }
       }
     });
@@ -587,11 +609,12 @@ const logout = async (req, res) => {
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
+      console.log('Log d\'audit créé');
     } catch (auditError) {
       console.warn('Erreur non-bloquante du log d\'audit:', auditError.message);
     }
 
-    console.log('Déconnexion enregistrée\n');
+    console.log('✓ Déconnexion enregistrée\n');
 
     res.json({
       success: true,
