@@ -1,6 +1,6 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/database');
-const User = require('./User'); // ✅ correct
+
 const Appointment = sequelize.define('Appointment', {
   id: {
     type: DataTypes.UUID,
@@ -28,7 +28,7 @@ const Appointment = sequelize.define('Appointment', {
     allowNull: false
   },
   duration: {
-    type: DataTypes.INTEGER, // en minutes
+    type: DataTypes.INTEGER,
     defaultValue: 30
   },
   status: {
@@ -89,27 +89,6 @@ const Appointment = sequelize.define('Appointment', {
       fields: ['appointmentDate']
     }
   ]
-});
-
-// Définir les associations
-Appointment.belongsTo(User, { 
-  as: 'patient', 
-  foreignKey: 'patientId' 
-});
-
-Appointment.belongsTo(User, { 
-  as: 'doctor', 
-  foreignKey: 'doctorId' 
-});
-
-User.hasMany(Appointment, { 
-  as: 'patientAppointments', 
-  foreignKey: 'patientId' 
-});
-
-User.hasMany(Appointment, { 
-  as: 'doctorAppointments', 
-  foreignKey: 'doctorId' 
 });
 
 module.exports = Appointment;

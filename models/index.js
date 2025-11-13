@@ -2,20 +2,24 @@ const { sequelize } = require('../config/database');
 const User = require('./User');
 const Appointment = require('./Appointment');
 
-// Définir les associations SANS alias pour éviter les conflits
+// ✅ Associations AVEC alias obligatoires pour différencier patient et docteur
 User.hasMany(Appointment, { 
+  as: 'patientAppointments',  // ← Alias OBLIGATOIRE
   foreignKey: 'patientId' 
 });
 
 User.hasMany(Appointment, { 
+  as: 'doctorAppointments',   // ← Alias OBLIGATOIRE et DIFFÉRENT
   foreignKey: 'doctorId' 
 });
 
 Appointment.belongsTo(User, { 
+  as: 'patient',              // ← Alias OBLIGATOIRE (utilisé dans le controller)
   foreignKey: 'patientId' 
 });
 
 Appointment.belongsTo(User, { 
+  as: 'doctor',               // ← Alias OBLIGATOIRE (utilisé dans le controller)
   foreignKey: 'doctorId' 
 });
 
