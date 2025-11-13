@@ -598,3 +598,14 @@ exports.rateAppointment = async (req, res) => {
     });
   }
 };
+// Réexporter toutes les fonctions pour l'import avec require()
+module.exports = {
+  createAppointment: exports.createAppointment,
+  getAppointments: exports.getAppointments,
+  getAppointmentById: exports.getAppointmentById,
+  updateAppointmentStatus: exports.updateAppointmentStatus,
+  cancelAppointment: exports.cancelAppointment,
+  confirmAppointment: exports.confirmAppointment,
+  completeAppointment: exports.completeAppointment,
+  rateAppointment: exports.rateAppointment
+};
