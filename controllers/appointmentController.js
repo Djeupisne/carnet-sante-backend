@@ -4,7 +4,7 @@ const { notificationService } = require('../services/notificationService');
 const { Op } = require('sequelize');
 
 // Créer un nouveau rendez-vous
-exports.createAppointment = async (req, res) => {
+const createAppointment = async (req, res) => {
   try {
     const {
       doctorId,
@@ -143,7 +143,7 @@ exports.createAppointment = async (req, res) => {
 };
 
 // Récupérer tous les rendez-vous
-exports.getAppointments = async (req, res) => {
+const getAppointments = async (req, res) => {
   try {
     const { page = 1, limit = 20, status, type } = req.query;
     const userId = req.user.id;
@@ -159,7 +159,6 @@ exports.getAppointments = async (req, res) => {
     } else if (userRole === 'doctor') {
       whereClause.doctorId = userId;
     }
-    // Les admins voient tous les rendez-vous
 
     if (status) {
       whereClause.status = status;
@@ -219,7 +218,7 @@ exports.getAppointments = async (req, res) => {
 };
 
 // Récupérer un rendez-vous par ID
-exports.getAppointmentById = async (req, res) => {
+const getAppointmentById = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -229,8 +228,6 @@ exports.getAppointmentById = async (req, res) => {
 
     let whereCondition = { id };
     
-    // Les patients ne peuvent voir que leurs propres rendez-vous
-    // Les médecins ne peuvent voir que les rendez-vous où ils sont le médecin
     if (userRole === 'patient') {
       whereCondition.patientId = userId;
     } else if (userRole === 'doctor') {
@@ -284,7 +281,7 @@ exports.getAppointmentById = async (req, res) => {
 };
 
 // Mettre à jour le statut d'un rendez-vous
-exports.updateAppointmentStatus = async (req, res) => {
+const updateAppointmentStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, cancellationReason } = req.body;
@@ -305,7 +302,6 @@ exports.updateAppointmentStatus = async (req, res) => {
       });
     }
 
-    // Vérifier les permissions
     if (req.user.role === 'patient' && appointment.patientId !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -327,7 +323,6 @@ exports.updateAppointmentStatus = async (req, res) => {
 
     await appointment.update(updates);
 
-    // Notifier l'autre partie
     const notificationUserId = req.user.role === 'patient' 
       ? appointment.doctorId 
       : appointment.patientId;
@@ -344,7 +339,6 @@ exports.updateAppointmentStatus = async (req, res) => {
       console.warn('⚠️ Erreur lors de la création de la notification:', notifError.message);
     }
 
-    // Log d'audit
     try {
       await AuditLog.create({
         action: 'APPOINTMENT_STATUS_UPDATED',
@@ -380,7 +374,7 @@ exports.updateAppointmentStatus = async (req, res) => {
 };
 
 // Annuler un rendez-vous
-exports.cancelAppointment = async (req, res) => {
+const cancelAppointment = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -434,7 +428,7 @@ exports.cancelAppointment = async (req, res) => {
 };
 
 // Confirmer un rendez-vous
-exports.confirmAppointment = async (req, res) => {
+const confirmAppointment = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -479,7 +473,7 @@ exports.confirmAppointment = async (req, res) => {
 };
 
 // Marquer un rendez-vous comme terminé
-exports.completeAppointment = async (req, res) => {
+const completeAppointment = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -546,7 +540,7 @@ exports.completeAppointment = async (req, res) => {
 };
 
 // Noter un rendez-vous
-exports.rateAppointment = async (req, res) => {
+const rateAppointment = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
@@ -558,7 +552,7 @@ exports.rateAppointment = async (req, res) => {
       where: { 
         id, 
         patientId: userId,
-        status: 'completed' // Ne peut noter que les rendez-vous terminés
+        status: 'completed'
       }
     });
 
@@ -598,14 +592,15 @@ exports.rateAppointment = async (req, res) => {
     });
   }
 };
-// Réexporter toutes les fonctions pour l'import avec require()
+
+// Export de toutes les fonctions
 module.exports = {
-  createAppointment: exports.createAppointment,
-  getAppointments: exports.getAppointments,
-  getAppointmentById: exports.getAppointmentById,
-  updateAppointmentStatus: exports.updateAppointmentStatus,
-  cancelAppointment: exports.cancelAppointment,
-  confirmAppointment: exports.confirmAppointment,
-  completeAppointment: exports.completeAppointment,
-  rateAppointment: exports.rateAppointment
+  createAppointment,
+  getAppointments,
+  getAppointmentById,
+  updateAppointmentStatus,
+  cancelAppointment,
+  confirmAppointment,
+  completeAppointment,
+  rateAppointment
 };
