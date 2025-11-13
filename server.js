@@ -163,6 +163,7 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/calendars', require('./routes/calendar'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/doctors', require('./routes/doctors'));
+
 // ✅ ROUTE DE SANTÉ AMÉLIORÉE
 app.get('/health', async (req, res) => {
   try {
