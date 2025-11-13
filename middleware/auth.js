@@ -87,4 +87,4 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
-module.exports = { authenticateToken, authorizeRole, optionalAuth, authenticate: authenticateToken }; // Ajout de 'authenticate' comme alias
+module.exports = { authenticateToken, authorizeRole, optionalAuth, authenticate: authenticateToken ,auth: authenticateToken}; // Ajout de 'authenticate' comme alias
