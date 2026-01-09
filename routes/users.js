@@ -1,70 +1,110 @@
 const express = require('express');
-const User = require('../models/User'); // Ajustez si nécessaire
-const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const { authenticate } = require('../middleware/auth');
+const { logger } = require('../utils/logger');
+
 const router = express.Router();
 
-// Middleware pour vérifier le token JWT
-const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  console.log(`[${new Date().toISOString()}] Vérification du token pour ${req.url}:`, authHeader || 'Aucun token');
-  
-  if (!authHeader) {
-    req.user = null;
-    return next();
-  }
-
-  const token = authHeader.split(' ')[1];
-  if (!token) {
-    req.user = null;
-    return next();
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
-    req.user = decoded;
-    console.log(`[${new Date().toISOString()}] Token vérifié, utilisateur:`, decoded);
-    next();
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] Erreur de vérification du token:`, error.message);
-    req.user = null;
-    next();
-  }
-};
-
-// Middleware pour logger les requêtes
+// Middleware de logging
 router.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] Requête ${req.method} ${req.url} reçue avec query:`, req.query);
+  logger.info(`[USERS] ${req.method} ${req.url}`, {
+    query: req.query,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
   next();
 });
 
 /**
- * GET /api/users?role=doctor ou /api/users?role=patient
+ * GET /api/users?role=doctor
+ * GET /api/users?role=patient
  * Récupère tous les utilisateurs d'un rôle spécifique
  */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const { role } = req.query;
-    console.log(`[${new Date().toISOString()}] Récupération des utilisateurs avec rôle: ${role}`);
+    
+    logger.info(`[USERS] Récupération des utilisateurs avec rôle: ${role}`, {
+      userId: req.user?.id,
+      userRole: req.user?.role
+    });
     
     // Validation du rôle
-    if (!role || !['doctor', 'patient'].includes(role)) {
-      console.log(`[${new Date().toISOString()}] Erreur: Rôle invalide ou manquant - ${role}`);
+    if (!role || !['doctor', 'patient', 'admin'].includes(role)) {
+      logger.warn(`[USERS] Rôle invalide ou manquant: ${role}`);
       return res.status(400).json({ 
         success: false, 
-        message: 'Rôle invalide. Utilisez "doctor" ou "patient"' 
+        message: 'Rôle invalide. Utilisez "doctor", "patient" ou "admin"' 
       });
     }
 
-    console.log(`[${new Date().toISOString()}] Exécution de User.findAll pour rôle: ${role}`);
+    // Vérification des permissions
+    // Les patients peuvent voir les médecins
+    // Les médecins peuvent voir les patients
+    // Les admins peuvent tout voir
+    if (req.user.role === 'patient' && role !== 'doctor') {
+      logger.warn(`[USERS] Patient tentant d'accéder à ${role}`);
+      return res.status(403).json({
+        success: false,
+        message: 'Accès refusé. Les patients peuvent uniquement voir les médecins.'
+      });
+    }
+
+    if (req.user.role === 'doctor' && role !== 'patient') {
+      logger.warn(`[USERS] Médecin tentant d'accéder à ${role}`);
+      return res.status(403).json({
+        success: false,
+        message: 'Accès refusé. Les médecins peuvent uniquement voir les patients.'
+      });
+    }
+
+    // Définir les attributs à retourner selon le rôle
+    let attributes;
     
-    // Définir les attributs en fonction du rôle
-    const attributes = role === 'patient' 
-      ? ['id', 'firstName', 'lastName', 'phoneNumber', 'bloodType', 'gender', 'createdAt']
-      : ['id', 'firstName', 'lastName', 'specialty', 'isActive', 'availability', 'email', 'phoneNumber', 'createdAt'];
+    if (role === 'patient') {
+      attributes = [
+        'id', 
+        'firstName', 
+        'lastName', 
+        'phoneNumber', 
+        'bloodType', 
+        'gender', 
+        'dateOfBirth',
+        'email',
+        'createdAt'
+      ];
+    } else if (role === 'doctor') {
+      attributes = [
+        'id', 
+        'firstName', 
+        'lastName', 
+        'specialty', 
+        'isActive', 
+        'availability',
+        'email', 
+        'phoneNumber',
+        'bio',
+        'licenseNumber',
+        'createdAt'
+      ];
+    } else {
+      attributes = [
+        'id',
+        'firstName',
+        'lastName',
+        'email',
+        'role',
+        'isActive',
+        'createdAt'
+      ];
+    }
 
     // Récupérer les utilisateurs
     const users = await User.findAll({
-      where: { role },
+      where: { 
+        role,
+        ...(role === 'doctor' ? { isActive: true } : {}) // Seulement les médecins actifs
+      },
       attributes,
       order: [
         ['lastName', 'ASC'],
@@ -72,75 +112,22 @@ router.get('/', authMiddleware, async (req, res) => {
       ]
     });
 
-    console.log(`[${new Date().toISOString()}] ✅ ${users.length} utilisateurs (${role}) récupérés`);
+    logger.info(`[USERS] ✅ ${users.length} utilisateurs (${role}) récupérés`);
     
     // Retourner directement le tableau pour compatibilité avec le frontend
     res.json(users);
     
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] ❌ Erreur lors de la récupération des utilisateurs (${req.query.role}):`, error.message);
-    console.error('Stack trace:', error.stack);
+    logger.error(`[USERS] ❌ Erreur lors de la récupération des utilisateurs:`, {
+      error: error.message,
+      stack: error.stack,
+      role: req.query.role
+    });
     
     res.status(500).json({ 
       success: false, 
       message: 'Erreur interne du serveur lors de la récupération des utilisateurs',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
-});
-
-/**
- * PUT /api/users/:id
- * Met à jour un utilisateur (ex: isActive, availability)
- */
-router.put('/:id', authMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updateData = req.body;
-    
-    console.log(`[${new Date().toISOString()}] Mise à jour de l'utilisateur ID: ${id} avec:`, updateData);
-
-    // Vérifier que l'utilisateur existe
-    const user = await User.findByPk(id);
-    
-    if (!user) {
-      console.log(`[${new Date().toISOString()}] ❌ Utilisateur non trouvé - ID: ${id}`);
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Utilisateur non trouvé' 
-      });
-    }
-
-    // Vérification des permissions (optionnel)
-    if (req.user && req.user.role !== 'admin' && req.user.id !== id) {
-      console.log(`[${new Date().toISOString()}] ⛔ Accès non autorisé pour ID: ${id}, utilisateur:`, req.user);
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Accès non autorisé' 
-      });
-    }
-
-    // Mettre à jour l'utilisateur
-    await user.update(updateData);
-    
-    console.log(`[${new Date().toISOString()}] ✅ Utilisateur mis à jour: ${id}`);
-    
-    res.json({ 
-      success: true, 
-      data: user,
-      message: 'Utilisateur mis à jour avec succès'
-    });
-    
-  } catch (error) {
-    console.error(`[${new Date().toISOString()}] ❌ Erreur lors de la mise à jour de l'utilisateur:`, error.message);
-    console.error('Stack trace:', error.stack);
-    
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erreur interne du serveur lors de la mise à jour',
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -149,24 +136,45 @@ router.put('/:id', authMiddleware, async (req, res) => {
  * GET /api/users/:id
  * Récupère un utilisateur par son ID
  */
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(`[${new Date().toISOString()}] Récupération de l'utilisateur ID: ${id}`);
+    
+    logger.info(`[USERS] Récupération de l'utilisateur ID: ${id}`, {
+      requestedBy: req.user?.id
+    });
 
     const user = await User.findByPk(id, {
-      attributes: { exclude: ['password'] } // Exclure le mot de passe
+      attributes: { exclude: ['password'] }
     });
 
     if (!user) {
-      console.log(`[${new Date().toISOString()}] ❌ Utilisateur non trouvé - ID: ${id}`);
+      logger.warn(`[USERS] ❌ Utilisateur non trouvé - ID: ${id}`);
       return res.status(404).json({ 
         success: false, 
         message: 'Utilisateur non trouvé' 
       });
     }
 
-    console.log(`[${new Date().toISOString()}] ✅ Utilisateur récupéré: ${id}`);
+    // Vérification des permissions
+    // Un utilisateur peut voir son propre profil
+    // Un médecin peut voir ses patients
+    // Un admin peut tout voir
+    if (req.user.role !== 'admin' && 
+        req.user.id !== id && 
+        !(req.user.role === 'doctor' && user.role === 'patient') &&
+        !(req.user.role === 'patient' && user.role === 'doctor')) {
+      logger.warn(`[USERS] ⛔ Accès non autorisé`, {
+        requestedBy: req.user.id,
+        requestedUser: id
+      });
+      return res.status(403).json({
+        success: false,
+        message: 'Accès non autorisé'
+      });
+    }
+
+    logger.info(`[USERS] ✅ Utilisateur récupéré: ${id}`);
     
     res.json({ 
       success: true, 
@@ -174,12 +182,195 @@ router.get('/:id', authMiddleware, async (req, res) => {
     });
     
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] ❌ Erreur lors de la récupération de l'utilisateur:`, error.message);
+    logger.error(`[USERS] ❌ Erreur lors de la récupération de l'utilisateur:`, {
+      error: error.message,
+      userId: req.params.id
+    });
     
     res.status(500).json({ 
       success: false, 
       message: 'Erreur interne du serveur',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * PUT /api/users/:id
+ * Met à jour un utilisateur (disponibilité, statut, etc.)
+ */
+router.put('/:id', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    logger.info(`[USERS] Mise à jour de l'utilisateur ID: ${id}`, {
+      data: updateData,
+      requestedBy: req.user?.id
+    });
+
+    // Vérifier que l'utilisateur existe
+    const user = await User.findByPk(id);
+    
+    if (!user) {
+      logger.warn(`[USERS] ❌ Utilisateur non trouvé - ID: ${id}`);
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Utilisateur non trouvé' 
+      });
+    }
+
+    // Vérification des permissions
+    // Un utilisateur peut mettre à jour son propre profil
+    // Un admin peut tout mettre à jour
+    if (req.user.role !== 'admin' && req.user.id !== id) {
+      logger.warn(`[USERS] ⛔ Accès non autorisé pour mise à jour`, {
+        requestedBy: req.user.id,
+        targetUser: id
+      });
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Accès non autorisé. Vous ne pouvez modifier que votre propre profil.' 
+      });
+    }
+
+    // Liste des champs modifiables selon le rôle
+    const allowedFields = req.user.role === 'admin' 
+      ? Object.keys(updateData) // Admin peut tout modifier
+      : ['firstName', 'lastName', 'phoneNumber', 'bloodType', 'gender', 
+         'dateOfBirth', 'specialty', 'isActive', 'availability', 'bio', 'address',
+         'city', 'postalCode', 'country', 'profilePicture'];
+
+    // Filtrer les données à mettre à jour
+    const filteredData = {};
+    allowedFields.forEach(field => {
+      if (updateData[field] !== undefined) {
+        filteredData[field] = updateData[field];
+      }
+    });
+
+    // Mettre à jour l'utilisateur
+    await user.update(filteredData);
+    
+    logger.info(`[USERS] ✅ Utilisateur mis à jour: ${id}`, {
+      updatedFields: Object.keys(filteredData)
+    });
+    
+    res.json({ 
+      success: true, 
+      data: user,
+      message: 'Utilisateur mis à jour avec succès'
+    });
+    
+  } catch (error) {
+    logger.error(`[USERS] ❌ Erreur lors de la mise à jour de l'utilisateur:`, {
+      error: error.message,
+      stack: error.stack,
+      userId: req.params.id
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur interne du serveur lors de la mise à jour',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * PATCH /api/users/:id/toggle-active
+ * Active/désactive un utilisateur (admin ou self)
+ */
+router.patch('/:id/toggle-active', authenticate, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    logger.info(`[USERS] Toggle active pour utilisateur ID: ${id}`, {
+      requestedBy: req.user?.id
+    });
+
+    // Vérification des permissions
+    if (req.user.role !== 'admin' && req.user.id !== id) {
+      logger.warn(`[USERS] ⛔ Accès non autorisé pour toggle active`);
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Accès non autorisé' 
+      });
+    }
+
+    const user = await User.findByPk(id);
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Utilisateur non trouvé' 
+      });
+    }
+
+    // Toggle le statut
+    await user.update({ isActive: !user.isActive });
+    
+    logger.info(`[USERS] ✅ Statut actif modifié: ${id} -> ${user.isActive}`);
+    
+    res.json({ 
+      success: true, 
+      data: user,
+      message: `Utilisateur ${user.isActive ? 'activé' : 'désactivé'} avec succès`
+    });
+    
+  } catch (error) {
+    logger.error(`[USERS] ❌ Erreur toggle active:`, {
+      error: error.message,
+      userId: req.params.id
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur interne du serveur',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/users/doctors/specialties
+ * Récupère la liste des spécialités disponibles
+ */
+router.get('/doctors/specialties', authenticate, async (req, res) => {
+  try {
+    logger.info('[USERS] Récupération des spécialités médicales');
+
+    const specialties = await User.findAll({
+      where: { 
+        role: 'doctor',
+        specialty: { [require('sequelize').Op.ne]: null }
+      },
+      attributes: ['specialty'],
+      group: ['specialty'],
+      raw: true
+    });
+
+    const specialtyList = specialties
+      .map(s => s.specialty)
+      .filter(Boolean)
+      .sort();
+
+    logger.info(`[USERS] ✅ ${specialtyList.length} spécialités trouvées`);
+    
+    res.json({ 
+      success: true, 
+      data: specialtyList 
+    });
+    
+  } catch (error) {
+    logger.error('[USERS] ❌ Erreur récupération spécialités:', {
       error: error.message
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur interne du serveur',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
