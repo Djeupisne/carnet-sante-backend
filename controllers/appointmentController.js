@@ -1,4 +1,4 @@
-const { Appointment, User, Payment, MedicalFile, AuditLog } = require('../models/index');
+const { Appointment, User, Payment, AuditLog, Op } = require('../models');
 const { validationService } = require('../services/validationService');
 const { notificationService } = require('../services/notificationService');
 const { Op } = require('sequelize');
