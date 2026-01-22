@@ -202,10 +202,6 @@ const User = sequelize.define('User', {
           console.log('Mot de passe hashé avec succès');
         }
 
-        // ✅ CORRIGÉ : Supprimer la logique de nettoyage agressive
-        // La validation Express s'occupe déjà de la validation
-        // Ne pas forcer les champs à null
-
         // Gérer seulement les conversions nécessaires
         if (user.role === 'doctor') {
           // Pour les médecins, s'assurer que languages est un tableau
@@ -235,7 +231,7 @@ const User = sequelize.define('User', {
           user.password = await bcrypt.hash(user.password, 12);
         }
 
-        // ✅ CORRIGÉ : Logique de nettoyage simplifiée
+        // Logique de nettoyage simplifiée
         if (user.changed('role')) {
           if (user.role === 'patient') {
             // Nettoyer seulement si explicitement changé en patient
@@ -263,6 +259,23 @@ const User = sequelize.define('User', {
     }
   }
 });
+
+/**
+ * MÉTHODE ASSOCIATE (AJOUT CRITIQUE)
+ */
+User.associate = function(models) {
+  if (models.Appointment) {
+    User.hasMany(models.Appointment, { 
+      as: 'patientAppointments',
+      foreignKey: 'patientId' 
+    });
+    
+    User.hasMany(models.Appointment, { 
+      as: 'doctorAppointments',
+      foreignKey: 'doctorId' 
+    });
+  }
+};
 
 /**
  * Méthode pour vérifier le mot de passe
