@@ -91,4 +91,21 @@ const Appointment = sequelize.define('Appointment', {
   ]
 });
 
+/**
+ * MÉTHODE ASSOCIATE (AJOUT CRITIQUE)
+ */
+Appointment.associate = function(models) {
+  if (models.User) {
+    Appointment.belongsTo(models.User, { 
+      as: 'patient',
+      foreignKey: 'patientId' 
+    });
+    
+    Appointment.belongsTo(models.User, { 
+      as: 'doctor',
+      foreignKey: 'doctorId' 
+    });
+  }
+};
+
 module.exports = Appointment;
