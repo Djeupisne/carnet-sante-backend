@@ -1,12 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const { User } = require('../models/User');
+// CORRECTION : Importer depuis models/index.js au lieu de models/User
+const { User } = require('../models'); // ← IMPORTANT: Changement ici
 const { auth } = require('../middleware/auth');
 
 // GET /api/doctors - Récupérer tous les médecins
 router.get('/', auth, async (req, res) => {
   try {
     console.log('📋 Récupération de tous les médecins...');
+    
+    // VÉRIFICATION DE DÉBOGAGE
+    console.log('🔍 Type de User:', typeof User);
+    console.log('🔍 User.findAll existe?', typeof User.findAll);
+    
+    if (!User || typeof User.findAll !== 'function') {
+      console.error('❌ ERREUR CRITIQUE: Modèle User non chargé correctement');
+      throw new Error('Modèle User non disponible - vérifiez l\'import dans models/index.js');
+    }
     
     const doctors = await User.findAll({
       where: { 
@@ -22,7 +32,7 @@ router.get('/', auth, async (req, res) => {
       order: [['firstName', 'ASC']]
     });
 
-     console.log(`✅ ${doctors.length} médecins trouvés`);
+    console.log(`✅ ${doctors.length} médecins trouvés`);
     res.json({
       success: true,
       data: doctors,
@@ -30,7 +40,10 @@ router.get('/', auth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la récupération des médecins:', error);
+    console.error('❌ Erreur lors de la récupération des médecins:', {
+      message: error.message,
+      stack: error.stack
+    });
     res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de la récupération des médecins',
