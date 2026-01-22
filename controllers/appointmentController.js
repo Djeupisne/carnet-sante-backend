@@ -1,7 +1,6 @@
 const { Appointment, User, Payment, AuditLog, Op } = require('../models');
 const { validationService } = require('../services/validationService');
 const { notificationService } = require('../services/notificationService');
-const { Op } = require('sequelize');
 
 // Créer un nouveau rendez-vous
 const createAppointment = async (req, res) => {
