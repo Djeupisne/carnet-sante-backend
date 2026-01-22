@@ -16,7 +16,7 @@ const generateToken = (userId) => {
 
 /**
  * POST /api/auth/register
- * ✅ CORRIGÉ : Le mot de passe n'est PAS hashé ici, le hook beforeCreate s'en charge
+ * ✅ CORRIGÉ : Validation améliorée pour les médecins
  */
 const register = async (req, res) => {
   try {
@@ -31,7 +31,7 @@ const register = async (req, res) => {
       dateOfBirth, 
       gender, 
       phoneNumber, 
-      role,
+      role = 'patient',
       bloodType,
       specialty,
       licenseNumber,
@@ -39,23 +39,55 @@ const register = async (req, res) => {
       languages
     } = req.body;
 
-    console.log('Données reçues:', {
+    console.log('📥 Données reçues:', {
       email,
       firstName,
       lastName,
       dateOfBirth,
       gender,
-      role: role || 'patient',
+      role,
       bloodType,
       specialty,
       licenseNumber,
       biography: biography ? `${biography.substring(0, 50)}...` : null,
-      languages
+      languages,
+      typeOfLanguages: typeof languages
     });
 
-    // Validation basique avant la création
+    // ✅ VALIDATION SPÉCIFIQUE POUR LES MÉDECINS
+    if (role === 'doctor') {
+      console.log('🔍 Validation des champs médecin...');
+      const doctorErrors = [];
+      
+      if (!specialty || specialty.trim() === '') {
+        doctorErrors.push('La spécialité est requise pour les médecins');
+        console.log('❌ Spécialité manquante');
+      }
+      
+      if (!licenseNumber || licenseNumber.trim() === '') {
+        doctorErrors.push('Le numéro de licence est requis pour les médecins');
+        console.log('❌ Numéro de licence manquant');
+      }
+      
+      if (!biography || biography.trim() === '' || biography.trim().length < 50) {
+        doctorErrors.push('La biographie doit contenir au moins 50 caractères');
+        console.log('❌ Biographie invalide');
+      }
+      
+      if (doctorErrors.length > 0) {
+        console.log('❌ Erreurs médecin:', doctorErrors);
+        return res.status(400).json({
+          success: false,
+          message: 'Erreurs de validation pour le profil médecin',
+          errors: doctorErrors
+        });
+      }
+      console.log('✅ Validation médecin réussie');
+    }
+
+    // Validation basique pour tous les utilisateurs
     if (!email || !password || !firstName || !lastName || !dateOfBirth || !gender) {
-      console.log('Champs obligatoires manquants');
+      console.log('❌ Champs obligatoires manquants');
       return res.status(400).json({
         success: false,
         message: 'Tous les champs obligatoires doivent être complétés',
@@ -71,63 +103,84 @@ const register = async (req, res) => {
     }
 
     // Vérifier si l'utilisateur existe déjà
-    console.log('Vérification de l\'unicité de l\'email...');
+    console.log('🔍 Vérification de l\'unicité de l\'email...');
     const existingUser = await User.findOne({ 
       where: { email: email.toLowerCase() } 
     });
 
     if (existingUser) {
-      console.log('Email déjà utilisé:', email);
+      console.log('❌ Email déjà utilisé:', email);
       return res.status(409).json({
         success: false,
         message: 'Un utilisateur avec cet email existe déjà',
         field: 'email'
       });
     }
-    console.log('Email disponible');
+    console.log('✅ Email disponible');
 
-    // ✅ CORRIGÉ : NE PAS hacher le mot de passe ici
-    // Le hook beforeCreate s'en charge automatiquement
-
-    // Créer l'utilisateur avec le mot de passe EN CLAIR
-    console.log('Création de l\'utilisateur...');
+    // ✅ CORRIGÉ : Préparer les données avec formatage correct
+    console.log('📦 Préparation des données utilisateur...');
     const userData = {
       email: email.toLowerCase(),
-      password, // ✅ Mot de passe en CLAIR (le hook le hashera)
+      password, // Mot de passe en CLAIR (le hook le hashera)
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       dateOfBirth,
       gender,
       phoneNumber: phoneNumber || null,
-      role: role || 'patient',
+      role,
       bloodType: bloodType || null,
       specialty: specialty || null,
       licenseNumber: licenseNumber || null,
       biography: biography || null,
-      languages: languages || null,
       isActive: true,
       isVerified: false,
       profileCompleted: false
     };
 
-    console.log('Données utilisateur pour création (sans password):', {
+    // ✅ CORRIGÉ : Formater correctement les langues
+    if (languages) {
+      if (typeof languages === 'string') {
+        try {
+          userData.languages = JSON.parse(languages);
+        } catch (e) {
+          userData.languages = [languages];
+        }
+      } else if (Array.isArray(languages)) {
+        userData.languages = languages;
+      } else {
+        userData.languages = [];
+      }
+    } else if (role === 'doctor') {
+      userData.languages = [];
+    }
+
+    console.log('📤 Données utilisateur pour création:', {
       ...userData,
-      password: '*** SERA HASHÉ PAR LE HOOK ***'
+      password: '*** SERA HASHÉ PAR LE HOOK ***',
+      specialty: userData.specialty,
+      licenseNumber: userData.licenseNumber,
+      languages: userData.languages
     });
 
+    // Créer l'utilisateur
+    console.log('⚙️ Création de l\'utilisateur dans la base de données...');
     const user = await User.create(userData);
 
-    console.log('Utilisateur créé:', { 
+    console.log('✅ Utilisateur créé:', { 
       id: user.id, 
       email: user.email,
       uniqueCode: user.uniqueCode,
-      role: user.role
+      role: user.role,
+      specialty: user.specialty,  // VÉRIFIER ICI
+      licenseNumber: user.licenseNumber,
+      languages: user.languages
     });
 
     // Générer le token
-    console.log('Génération du token JWT...');
+    console.log('🔑 Génération du token JWT...');
     const token = generateToken(user.id);
-    console.log('Token généré');
+    console.log('✅ Token généré');
 
     // Log d'audit (non-bloquant)
     try {
@@ -139,25 +192,27 @@ const register = async (req, res) => {
         details: {
           email: user.email,
           role: user.role,
-          uniqueCode: user.uniqueCode
+          uniqueCode: user.uniqueCode,
+          specialty: user.specialty
         }
       });
-      console.log('Log d\'audit créé');
+      console.log('📝 Log d\'audit créé');
     } catch (auditError) {
-      console.warn('Erreur non-bloquante du log d\'audit:', auditError.message);
+      console.warn('⚠️ Erreur non-bloquante du log d\'audit:', auditError.message);
     }
 
     logger.info('Enregistrement réussi', {
       userId: user.id,
       email: user.email,
-      role: user.role
+      role: user.role,
+      specialty: user.specialty
     });
 
-    console.log('✓ Enregistrement réussi\n');
+    console.log('🎉 === ENREGISTREMENT RÉUSSI ===\n');
 
     res.status(201).json({
       success: true,
-      message: 'Utilisateur créé avec succès',
+      message: 'Compte créé avec succès',
       data: {
         user: {
           id: user.id,
@@ -184,11 +239,17 @@ const register = async (req, res) => {
   } catch (error) {
     console.error('\n❌ Erreur enregistrement:', error.message);
     console.error('Stack:', error.stack);
+    console.error('Données qui ont causé l\'erreur:', {
+      email: req.body.email,
+      role: req.body.role,
+      specialty: req.body.specialty
+    });
     
     logger.error('Erreur d\'enregistrement', {
       error: error.message,
       email: req.body.email,
-      role: req.body.role
+      role: req.body.role,
+      specialty: req.body.specialty
     });
 
     // Erreurs Sequelize
@@ -197,7 +258,7 @@ const register = async (req, res) => {
         field: err.path,
         message: err.message
       }));
-      console.error('Erreurs de validation Sequelize:', messages);
+      console.error('❌ Erreurs de validation Sequelize:', messages);
       return res.status(400).json({
         success: false,
         message: 'Erreur de validation',
@@ -206,7 +267,7 @@ const register = async (req, res) => {
     }
 
     if (error.name === 'SequelizeUniqueConstraintError') {
-      console.error('Erreur de contrainte unique:', error.errors);
+      console.error('❌ Erreur de contrainte unique:', error.errors);
       return res.status(409).json({
         success: false,
         message: 'Cette valeur est déjà utilisée',
@@ -231,11 +292,11 @@ const login = async (req, res) => {
     console.log('\n🔐 === LOGIN CONTROLLER ===');
     const { email, password } = req.body;
 
-    console.log('Email reçu:', email);
-    console.log('Mot de passe reçu:', password ? '***' : 'vide');
+    console.log('📥 Email reçu:', email);
+    console.log('📥 Mot de passe reçu:', password ? '***' : 'vide');
 
     if (!email || !password) {
-      console.log('Email ou mot de passe manquant');
+      console.log('❌ Email ou mot de passe manquant');
       return res.status(400).json({
         success: false,
         message: 'Email et mot de passe requis'
@@ -243,25 +304,27 @@ const login = async (req, res) => {
     }
 
     // Trouver l'utilisateur
-    console.log('Recherche de l\'utilisateur...');
+    console.log('🔍 Recherche de l\'utilisateur...');
     const user = await User.findOne({ 
       where: { email: email.toLowerCase() }
     });
 
     if (!user) {
-      console.log('Utilisateur non trouvé:', email);
+      console.log('❌ Utilisateur non trouvé:', email);
       return res.status(401).json({
         success: false,
         message: 'Email ou mot de passe incorrect'
       });
     }
 
-    console.log('Utilisateur trouvé:', user.email);
-    console.log('Hash stocké présent:', !!user.password);
+    console.log('✅ Utilisateur trouvé:', user.email);
+    console.log('🔍 Hash stocké présent:', !!user.password);
+    console.log('📊 Rôle utilisateur:', user.role);
+    console.log('🏥 Spécialité:', user.specialty);
 
     // Vérifier le verrouillage du compte
     if (user.isLocked && user.isLocked()) {
-      console.log('Compte verrouillé');
+      console.log('🔒 Compte verrouillé');
       return res.status(423).json({
         success: false,
         message: 'Compte temporairement verrouillé. Réessayez dans 15 minutes.'
@@ -269,20 +332,20 @@ const login = async (req, res) => {
     }
 
     // ✅ Vérifier le mot de passe avec la méthode du modèle
-    console.log('Vérification du mot de passe...');
+    console.log('🔐 Vérification du mot de passe...');
     const isPasswordValid = await user.comparePassword(password);
-    console.log('Résultat comparePassword:', isPasswordValid);
+    console.log('✅ Résultat comparePassword:', isPasswordValid);
 
     if (!isPasswordValid) {
-      console.log('Mot de passe incorrect');
+      console.log('❌ Mot de passe incorrect');
       
       // Incrémenter les tentatives
       if (user.incLoginAttempts) {
         try {
           await user.incLoginAttempts();
-          console.log('Tentatives mises à jour');
+          console.log('📈 Tentatives mises à jour');
         } catch (incError) {
-          console.error('Erreur lors de l\'incrémentation:', incError.message);
+          console.error('❌ Erreur lors de l\'incrémentation:', incError.message);
         }
       }
 
@@ -295,7 +358,7 @@ const login = async (req, res) => {
     console.log('✅ Mot de passe valide');
 
     // Réinitialiser les tentatives
-    console.log('Réinitialisation des tentatives...');
+    console.log('🔄 Réinitialisation des tentatives...');
     if (user.resetLoginAttempts) {
       await user.resetLoginAttempts();
     } else {
@@ -305,12 +368,12 @@ const login = async (req, res) => {
         lastLogin: new Date()
       });
     }
-    console.log('Tentatives réinitialisées');
+    console.log('✅ Tentatives réinitialisées');
 
     // Générer le token
-    console.log('Génération du token JWT...');
+    console.log('🔑 Génération du token JWT...');
     const token = generateToken(user.id);
-    console.log('Token généré');
+    console.log('✅ Token généré');
 
     // Log d'audit
     try {
@@ -320,17 +383,18 @@ const login = async (req, res) => {
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
-      console.log('Log d\'audit créé');
+      console.log('📝 Log d\'audit créé');
     } catch (auditError) {
-      console.warn('Erreur non-bloquante du log d\'audit:', auditError.message);
+      console.warn('⚠️ Erreur non-bloquante du log d\'audit:', auditError.message);
     }
 
     logger.info('Connexion réussie', {
       userId: user.id,
-      email: user.email
+      email: user.email,
+      role: user.role
     });
 
-    console.log('✓ === CONNEXION RÉUSSIE ===\n');
+    console.log('🎉 === CONNEXION RÉUSSIE ===\n');
 
     res.json({
       success: true,
@@ -343,6 +407,14 @@ const login = async (req, res) => {
           firstName: user.firstName,
           lastName: user.lastName,
           role: user.role,
+          gender: user.gender,
+          dateOfBirth: user.dateOfBirth,
+          phoneNumber: user.phoneNumber,
+          bloodType: user.bloodType,
+          specialty: user.specialty,
+          licenseNumber: user.licenseNumber,
+          biography: user.biography,
+          languages: user.languages,
           isVerified: user.isVerified,
           profileCompleted: user.profileCompleted
         },
@@ -386,7 +458,7 @@ const forgotPassword = async (req, res) => {
 
     // Toujours retourner le même message pour la sécurité
     if (!user) {
-      console.log('Email non trouvé (sécurité)');
+      console.log('📭 Email non trouvé (sécurité)');
       return res.json({
         success: true,
         message: 'Si un compte avec cet email existe, un lien de réinitialisation a été envoyé'
@@ -402,7 +474,7 @@ const forgotPassword = async (req, res) => {
       resetTokenExpiry
     });
 
-    console.log('Token de réinitialisation généré');
+    console.log('🔑 Token de réinitialisation généré');
 
     // Envoyer un email avec nodemailer
     if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
@@ -431,12 +503,12 @@ const forgotPassword = async (req, res) => {
           `,
         });
 
-        console.log('Email de réinitialisation envoyé');
+        console.log('📧 Email de réinitialisation envoyé');
       } catch (emailError) {
-        console.error('Erreur d\'envoi d\'email:', emailError.message);
+        console.error('❌ Erreur d\'envoi d\'email:', emailError.message);
       }
     } else {
-      console.log('Configuration email manquante, token généré mais email non envoyé');
+      console.log('⚠️ Configuration email manquante, token généré mais email non envoyé');
     }
 
     res.json({
@@ -481,7 +553,7 @@ const resetPassword = async (req, res) => {
     });
 
     if (!user) {
-      console.log('Token invalide ou expiré');
+      console.log('❌ Token invalide ou expiré');
       return res.status(400).json({
         success: false,
         message: 'Token de réinitialisation invalide ou expiré'
@@ -489,9 +561,9 @@ const resetPassword = async (req, res) => {
     }
 
     // Hacher le nouveau mot de passe
-    console.log('Hachage du nouveau mot de passe...');
+    console.log('🔐 Hachage du nouveau mot de passe...');
     const hashedPassword = await bcrypt.hash(password, 12);
-    console.log('Mot de passe hashé');
+    console.log('✅ Mot de passe hashé');
 
     // ✅ Mettre à jour avec { hooks: false } pour éviter le double hashage
     await user.update({
@@ -503,7 +575,7 @@ const resetPassword = async (req, res) => {
       lastPasswordChange: new Date()
     }, { hooks: false }); // ✅ Important : skip le hook beforeUpdate
 
-    console.log('Mot de passe réinitialisé');
+    console.log('✅ Mot de passe réinitialisé');
 
     // Log d'audit
     try {
@@ -513,12 +585,12 @@ const resetPassword = async (req, res) => {
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
-      console.log('Log d\'audit créé');
+      console.log('📝 Log d\'audit créé');
     } catch (auditError) {
-      console.warn('Erreur non-bloquante du log d\'audit:', auditError.message);
+      console.warn('⚠️ Erreur non-bloquante du log d\'audit:', auditError.message);
     }
 
-    console.log('✓ Réinitialisation réussie\n');
+    console.log('🎉 Réinitialisation réussie\n');
 
     res.json({
       success: true,
@@ -544,7 +616,7 @@ const resetPassword = async (req, res) => {
 const getCurrentUser = async (req, res) => {
   try {
     console.log('\n👤 === GET CURRENT USER CONTROLLER ===');
-    console.log('User ID:', req.user.id);
+    console.log('🔍 User ID:', req.user.id);
 
     const user = await User.findByPk(req.user.id, {
       attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] }
@@ -557,7 +629,9 @@ const getCurrentUser = async (req, res) => {
       });
     }
 
-    console.log('Utilisateur récupéré:', user.email);
+    console.log('✅ Utilisateur récupéré:', user.email);
+    console.log('🏥 Spécialité:', user.specialty);
+    console.log('📝 Role:', user.role);
 
     res.json({
       success: true,
@@ -573,6 +647,10 @@ const getCurrentUser = async (req, res) => {
           dateOfBirth: user.dateOfBirth,
           phoneNumber: user.phoneNumber,
           bloodType: user.bloodType,
+          specialty: user.specialty,
+          licenseNumber: user.licenseNumber,
+          biography: user.biography,
+          languages: user.languages,
           isVerified: user.isVerified,
           profileCompleted: user.profileCompleted,
           profilePicture: user.profilePicture
@@ -599,7 +677,7 @@ const getCurrentUser = async (req, res) => {
 const logout = async (req, res) => {
   try {
     console.log('\n🚪 === LOGOUT CONTROLLER ===');
-    console.log('User ID:', req.user.id);
+    console.log('🔍 User ID:', req.user.id);
 
     // Log d'audit
     try {
@@ -609,12 +687,12 @@ const logout = async (req, res) => {
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
-      console.log('Log d\'audit créé');
+      console.log('📝 Log d\'audit créé');
     } catch (auditError) {
-      console.warn('Erreur non-bloquante du log d\'audit:', auditError.message);
+      console.warn('⚠️ Erreur non-bloquante du log d\'audit:', auditError.message);
     }
 
-    console.log('✓ Déconnexion enregistrée\n');
+    console.log('🎉 Déconnexion enregistrée\n');
 
     res.json({
       success: true,
