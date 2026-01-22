@@ -16,9 +16,232 @@ router.use((req, res, next) => {
 });
 
 /**
+ * GET /api/users/patients
+ * Récupère tous les patients (pour les médecins)
+ */
+router.get('/patients', authenticate, async (req, res) => {
+  try {
+    logger.info('[USERS] Récupération de tous les patients', {
+      requestedBy: req.user?.id,
+      userRole: req.user?.role
+    });
+    
+    // Vérifier que l'utilisateur est un médecin ou admin
+    if (req.user.role !== 'doctor' && req.user.role !== 'admin') {
+      logger.warn('[USERS] ⛔ Accès refusé - Pas médecin/admin');
+      return res.status(403).json({
+        success: false,
+        message: 'Accès refusé. Seuls les médecins et administrateurs peuvent voir la liste des patients.'
+      });
+    }
+
+    const patients = await User.findAll({
+      where: { 
+        role: 'patient',
+        isActive: true 
+      },
+      attributes: [
+        'id', 
+        'firstName', 
+        'lastName', 
+        'phoneNumber', 
+        'bloodType', 
+        'gender', 
+        'dateOfBirth',
+        'email',
+        'createdAt'
+      ],
+      order: [
+        ['lastName', 'ASC'],
+        ['firstName', 'ASC']
+      ]
+    });
+
+    logger.info(`[USERS] ✅ ${patients.length} patients récupérés`);
+    
+    // ✅ CORRECTION : Retourner dans le format attendu par le frontend
+    res.json({
+      success: true,
+      data: patients,
+      count: patients.length
+    });
+    
+  } catch (error) {
+    logger.error('[USERS] ❌ Erreur lors de la récupération des patients:', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur interne du serveur lors de la récupération des patients',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/users/doctors
+ * Récupère tous les médecins (pour les patients)
+ */
+router.get('/doctors', authenticate, async (req, res) => {
+  try {
+    logger.info('[USERS] Récupération de tous les médecins', {
+      requestedBy: req.user?.id,
+      userRole: req.user?.role
+    });
+
+    const doctors = await User.findAll({
+      where: { 
+        role: 'doctor',
+        isActive: true 
+      },
+      attributes: [
+        'id', 
+        'firstName', 
+        'lastName', 
+        'specialty', 
+        'isActive', 
+        'availability',
+        'email', 
+        'phoneNumber',
+        'bio',
+        'licenseNumber',
+        'createdAt'
+      ],
+      order: [
+        ['lastName', 'ASC'],
+        ['firstName', 'ASC']
+      ]
+    });
+
+    logger.info(`[USERS] ✅ ${doctors.length} médecins récupérés`);
+    
+    // ✅ CORRECTION : Retourner dans le format attendu par le frontend
+    res.json({
+      success: true,
+      data: doctors,
+      count: doctors.length
+    });
+    
+  } catch (error) {
+    logger.error('[USERS] ❌ Erreur lors de la récupération des médecins:', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur interne du serveur lors de la récupération des médecins',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * GET /api/users/dashboard/stats
+ * Récupère les statistiques pour le dashboard
+ */
+router.get('/dashboard/stats', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    logger.info(`[USERS] Récupération des statistiques dashboard pour ${userRole}`, {
+      userId
+    });
+
+    let stats = {};
+
+    if (userRole === 'doctor') {
+      // Importer le modèle Appointment ici pour éviter les dépendances circulaires
+      const { Appointment } = require('../models');
+      const { Op } = require('sequelize');
+      
+      // Statistiques pour un médecin
+      const totalAppointments = await Appointment.count({
+        where: { doctorId: userId }
+      });
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+
+      const todayAppointments = await Appointment.count({
+        where: {
+          doctorId: userId,
+          appointmentDate: {
+            [Op.between]: [todayStart, todayEnd]
+          }
+        }
+      });
+
+      const totalPatients = await User.count({
+        where: { role: 'patient', isActive: true }
+      });
+
+      stats = {
+        totalAppointments,
+        todayAppointments,
+        totalPatients,
+        monthlyRevenue: 0
+      };
+
+    } else if (userRole === 'patient') {
+      const { Appointment } = require('../models');
+      const { Op } = require('sequelize');
+      
+      // Statistiques pour un patient
+      const totalAppointments = await Appointment.count({
+        where: { patientId: userId }
+      });
+
+      const upcomingAppointments = await Appointment.count({
+        where: {
+          patientId: userId,
+          appointmentDate: {
+            [Op.gte]: new Date()
+          },
+          status: {
+            [Op.in]: ['pending', 'confirmed']
+          }
+        }
+      });
+
+      stats = {
+        totalAppointments,
+        upcomingAppointments,
+        completedAppointments: 0,
+        totalDoctors: await User.count({ where: { role: 'doctor', isActive: true } })
+      };
+    }
+
+    logger.info('[USERS] ✅ Statistiques dashboard récupérées', { stats });
+
+    res.json({
+      success: true,
+      data: { stats }
+    });
+
+  } catch (error) {
+    logger.error('[USERS] ❌ Erreur lors de la récupération des statistiques:', {
+      error: error.message,
+      stack: error.stack
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Erreur serveur lors de la récupération des statistiques',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
  * GET /api/users?role=doctor
  * GET /api/users?role=patient
- * Récupère tous les utilisateurs d'un rôle spécifique
+ * Récupère tous les utilisateurs d'un rôle spécifique (ancienne méthode, gardée pour compatibilité)
  */
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -39,9 +262,6 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     // Vérification des permissions
-    // Les patients peuvent voir les médecins
-    // Les médecins peuvent voir les patients
-    // Les admins peuvent tout voir
     if (req.user.role === 'patient' && role !== 'doctor') {
       logger.warn(`[USERS] Patient tentant d'accéder à ${role}`);
       return res.status(403).json({
@@ -99,11 +319,10 @@ router.get('/', authenticate, async (req, res) => {
       ];
     }
 
-    // Récupérer les utilisateurs
     const users = await User.findAll({
       where: { 
         role,
-        ...(role === 'doctor' ? { isActive: true } : {}) // Seulement les médecins actifs
+        ...(role === 'doctor' ? { isActive: true } : {})
       },
       attributes,
       order: [
@@ -114,8 +333,12 @@ router.get('/', authenticate, async (req, res) => {
 
     logger.info(`[USERS] ✅ ${users.length} utilisateurs (${role}) récupérés`);
     
-    // Retourner directement le tableau pour compatibilité avec le frontend
-    res.json(users);
+    // ✅ CORRECTION : Retourner dans le format standard
+    res.json({
+      success: true,
+      data: users,
+      count: users.length
+    });
     
   } catch (error) {
     logger.error(`[USERS] ❌ Erreur lors de la récupération des utilisateurs:`, {
@@ -157,9 +380,6 @@ router.get('/:id', authenticate, async (req, res) => {
     }
 
     // Vérification des permissions
-    // Un utilisateur peut voir son propre profil
-    // Un médecin peut voir ses patients
-    // Un admin peut tout voir
     if (req.user.role !== 'admin' && 
         req.user.id !== id && 
         !(req.user.role === 'doctor' && user.role === 'patient') &&
@@ -197,7 +417,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
 /**
  * PUT /api/users/:id
- * Met à jour un utilisateur (disponibilité, statut, etc.)
+ * Met à jour un utilisateur
  */
 router.put('/:id', authenticate, async (req, res) => {
   try {
@@ -209,7 +429,6 @@ router.put('/:id', authenticate, async (req, res) => {
       requestedBy: req.user?.id
     });
 
-    // Vérifier que l'utilisateur existe
     const user = await User.findByPk(id);
     
     if (!user) {
@@ -221,27 +440,20 @@ router.put('/:id', authenticate, async (req, res) => {
     }
 
     // Vérification des permissions
-    // Un utilisateur peut mettre à jour son propre profil
-    // Un admin peut tout mettre à jour
     if (req.user.role !== 'admin' && req.user.id !== id) {
-      logger.warn(`[USERS] ⛔ Accès non autorisé pour mise à jour`, {
-        requestedBy: req.user.id,
-        targetUser: id
-      });
+      logger.warn(`[USERS] ⛔ Accès non autorisé pour mise à jour`);
       return res.status(403).json({ 
         success: false, 
-        message: 'Accès non autorisé. Vous ne pouvez modifier que votre propre profil.' 
+        message: 'Accès non autorisé' 
       });
     }
 
-    // Liste des champs modifiables selon le rôle
     const allowedFields = req.user.role === 'admin' 
-      ? Object.keys(updateData) // Admin peut tout modifier
+      ? Object.keys(updateData)
       : ['firstName', 'lastName', 'phoneNumber', 'bloodType', 'gender', 
          'dateOfBirth', 'specialty', 'isActive', 'availability', 'bio', 'address',
          'city', 'postalCode', 'country', 'profilePicture'];
 
-    // Filtrer les données à mettre à jour
     const filteredData = {};
     allowedFields.forEach(field => {
       if (updateData[field] !== undefined) {
@@ -249,12 +461,9 @@ router.put('/:id', authenticate, async (req, res) => {
       }
     });
 
-    // Mettre à jour l'utilisateur
     await user.update(filteredData);
     
-    logger.info(`[USERS] ✅ Utilisateur mis à jour: ${id}`, {
-      updatedFields: Object.keys(filteredData)
-    });
+    logger.info(`[USERS] ✅ Utilisateur mis à jour: ${id}`);
     
     res.json({ 
       success: true, 
@@ -263,15 +472,14 @@ router.put('/:id', authenticate, async (req, res) => {
     });
     
   } catch (error) {
-    logger.error(`[USERS] ❌ Erreur lors de la mise à jour de l'utilisateur:`, {
+    logger.error(`[USERS] ❌ Erreur mise à jour:`, {
       error: error.message,
-      stack: error.stack,
       userId: req.params.id
     });
     
     res.status(500).json({ 
       success: false, 
-      message: 'Erreur interne du serveur lors de la mise à jour',
+      message: 'Erreur interne du serveur',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -279,19 +487,15 @@ router.put('/:id', authenticate, async (req, res) => {
 
 /**
  * PATCH /api/users/:id/toggle-active
- * Active/désactive un utilisateur (admin ou self)
+ * Active/désactive un utilisateur
  */
 router.patch('/:id/toggle-active', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     
-    logger.info(`[USERS] Toggle active pour utilisateur ID: ${id}`, {
-      requestedBy: req.user?.id
-    });
+    logger.info(`[USERS] Toggle active pour ID: ${id}`);
 
-    // Vérification des permissions
     if (req.user.role !== 'admin' && req.user.id !== id) {
-      logger.warn(`[USERS] ⛔ Accès non autorisé pour toggle active`);
       return res.status(403).json({ 
         success: false, 
         message: 'Accès non autorisé' 
@@ -307,65 +511,18 @@ router.patch('/:id/toggle-active', authenticate, async (req, res) => {
       });
     }
 
-    // Toggle le statut
     await user.update({ isActive: !user.isActive });
     
-    logger.info(`[USERS] ✅ Statut actif modifié: ${id} -> ${user.isActive}`);
+    logger.info(`[USERS] ✅ Statut modifié: ${user.isActive}`);
     
     res.json({ 
       success: true, 
       data: user,
-      message: `Utilisateur ${user.isActive ? 'activé' : 'désactivé'} avec succès`
+      message: `Utilisateur ${user.isActive ? 'activé' : 'désactivé'}`
     });
     
   } catch (error) {
-    logger.error(`[USERS] ❌ Erreur toggle active:`, {
-      error: error.message,
-      userId: req.params.id
-    });
-    
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erreur interne du serveur',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-});
-
-/**
- * GET /api/users/doctors/specialties
- * Récupère la liste des spécialités disponibles
- */
-router.get('/doctors/specialties', authenticate, async (req, res) => {
-  try {
-    logger.info('[USERS] Récupération des spécialités médicales');
-
-    const specialties = await User.findAll({
-      where: { 
-        role: 'doctor',
-        specialty: { [require('sequelize').Op.ne]: null }
-      },
-      attributes: ['specialty'],
-      group: ['specialty'],
-      raw: true
-    });
-
-    const specialtyList = specialties
-      .map(s => s.specialty)
-      .filter(Boolean)
-      .sort();
-
-    logger.info(`[USERS] ✅ ${specialtyList.length} spécialités trouvées`);
-    
-    res.json({ 
-      success: true, 
-      data: specialtyList 
-    });
-    
-  } catch (error) {
-    logger.error('[USERS] ❌ Erreur récupération spécialités:', {
-      error: error.message
-    });
+    logger.error('[USERS] ❌ Erreur toggle:', error.message);
     
     res.status(500).json({ 
       success: false, 
