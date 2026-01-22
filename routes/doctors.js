@@ -22,8 +22,7 @@ router.get('/', auth, async (req, res) => {
       order: [['firstName', 'ASC']]
     });
 
-    console.log(`✅ ${doctors.length} médecins trouvés`);
-
+     console.log(`✅ ${doctors.length} médecins trouvés`);
     res.json({
       success: true,
       data: doctors,
