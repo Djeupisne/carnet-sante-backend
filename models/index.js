@@ -1,27 +1,55 @@
 const { sequelize } = require('../config/database');
-const User = require('./User');
-const Appointment = require('./Appointment');
+const fs = require('fs');
+const path = require('path');
 
-// ✅ Associations AVEC alias obligatoires pour différencier patient et docteur
-User.hasMany(Appointment, { 
-  as: 'patientAppointments',  // ← Alias OBLIGATOIRE
-  foreignKey: 'patientId' 
-});
+const basename = path.basename(__filename);
+const db = {};
 
-User.hasMany(Appointment, { 
-  as: 'doctorAppointments',   // ← Alias OBLIGATOIRE et DIFFÉRENT
-  foreignKey: 'doctorId' 
-});
+// Import automatique de tous les modèles
+fs.readdirSync(__dirname)
+  .filter(file => {
+    return (
+      file.indexOf('.') !== 0 &&
+      file !== basename &&
+      file.slice(-3) === '.js' &&
+      file.indexOf('.test.js') === -1
+    );
+  })
+  .forEach(file => {
+    const model = require(path.join(__dirname, file));
+    db[model.name] = model;
+    console.log(`✅ Modèle chargé: ${model.name}`);
+  });
 
-Appointment.belongsTo(User, { 
-  as: 'patient',              // ← Alias OBLIGATOIRE (utilisé dans le controller)
-  foreignKey: 'patientId' 
-});
+// Vérifier les modèles chargés
+console.log('🔍 Modèles chargés:', Object.keys(db));
 
-Appointment.belongsTo(User, { 
-  as: 'doctor',               // ← Alias OBLIGATOIRE (utilisé dans le controller)
-  foreignKey: 'doctorId' 
-});
+// DÉFINIR LES ASSOCIATIONS MANUELLEMENT
+if (db.User && db.Appointment) {
+  // User associations
+  db.User.hasMany(db.Appointment, { 
+    as: 'patientAppointments',
+    foreignKey: 'patientId' 
+  });
+  
+  db.User.hasMany(db.Appointment, { 
+    as: 'doctorAppointments',
+    foreignKey: 'doctorId' 
+  });
+  
+  // Appointment associations
+  db.Appointment.belongsTo(db.User, { 
+    as: 'patient',
+    foreignKey: 'patientId' 
+  });
+  
+  db.Appointment.belongsTo(db.User, { 
+    as: 'doctor',
+    foreignKey: 'doctorId' 
+  });
+  
+  console.log('✅ Associations définies entre User et Appointment');
+}
 
 // Synchroniser les modèles avec la base de données
 const syncModels = async () => {
@@ -34,9 +62,10 @@ const syncModels = async () => {
   }
 };
 
+// Exporter tous les modèles et fonctions
 module.exports = {
+  ...db,
   sequelize,
-  User,
-  Appointment,
-  syncModels
+  syncModels,
+  Op: require('sequelize').Op // Exporter Op pour les requêtes
 };
