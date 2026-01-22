@@ -1,3 +1,4 @@
+// CORRECTION : Import depuis models/index.js et Op inclus
 const { Appointment, User, Payment, AuditLog, Op } = require('../models');
 const { validationService } = require('../services/validationService');
 const { notificationService } = require('../services/notificationService');
@@ -141,7 +142,7 @@ const createAppointment = async (req, res) => {
   }
 };
 
-// Récupérer tous les rendez-vous
+// Récupérer tous les rendez-vous - VERSION CORRIGÉE AVEC DÉBOGAGE
 const getAppointments = async (req, res) => {
   try {
     const { page = 1, limit = 20, status, type } = req.query;
@@ -149,6 +150,18 @@ const getAppointments = async (req, res) => {
     const userRole = req.user.role;
 
     console.log(`📋 Récupération des rendez-vous pour l'utilisateur ${userId} (${userRole})...`);
+
+    // DÉBOGAGE: Vérifier les modèles importés
+    console.log('🔍 Vérification des modèles importés:');
+    console.log('- Appointment:', Appointment ? 'OK' : 'NULL');
+    console.log('- User:', User ? 'OK' : 'NULL');
+    console.log('- Payment:', Payment ? 'OK' : 'NULL');
+    console.log('- Op:', Op ? 'OK' : 'NULL');
+
+    if (!Appointment || typeof Appointment.findAndCountAll !== 'function') {
+      console.error('❌ ERREUR: Modèle Appointment non valide');
+      throw new Error('Modèle Appointment non chargé correctement');
+    }
 
     // Construire la requête selon le rôle
     const whereClause = {};
@@ -168,32 +181,70 @@ const getAppointments = async (req, res) => {
 
     const offset = (page - 1) * limit;
 
-    const { count, rows: appointments } = await Appointment.findAndCountAll({
-      where: whereClause,
-      include: [
-        {
+    // TEST SIMPLE SANS INCLUDES D'ABORD
+    console.log('🔍 Test sans includes...');
+    try {
+      const testResult = await Appointment.findAndCountAll({
+        where: whereClause,
+        limit: 1,
+        offset: 0
+      });
+      console.log(`✅ Test réussi: ${testResult.count} rendez-vous trouvés (sans includes)`);
+    } catch (testError) {
+      console.error('❌ Test échoué:', testError.message);
+      throw testError;
+    }
+
+    // PRÉPARER LES INCLUDES AVEC VÉRIFICATION
+    const includeConfig = [];
+
+    // Vérifier et ajouter l'inclusion du patient
+    if (User && typeof User === 'function') {
+      try {
+        // Vérifier si l'association existe
+        const associations = Appointment.associations;
+        console.log('🔍 Associations de Appointment:', Object.keys(associations || {}));
+        
+        includeConfig.push({
           model: User,
           as: 'patient',
           attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'dateOfBirth', 'gender']
-        },
-        {
+        });
+        
+        includeConfig.push({
           model: User,
           as: 'doctor',
           attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'specialty', 'licenseNumber', 'biography', 'consultationPrice', 'languages']
-        },
-        {
-          model: Payment,
-          as: 'payment',
-          attributes: ['id', 'amount', 'status', 'paymentMethod'],
-          required: false
-        }
-      ],
+        });
+      } catch (assocError) {
+        console.warn('⚠️ Erreur avec les associations User:', assocError.message);
+      }
+    } else {
+      console.warn('⚠️ Modèle User non disponible pour les includes');
+    }
+
+    // Vérifier et ajouter l'inclusion du paiement
+    if (Payment && typeof Payment === 'function') {
+      includeConfig.push({
+        model: Payment,
+        as: 'payment',
+        attributes: ['id', 'amount', 'status', 'paymentMethod'],
+        required: false
+      });
+    }
+
+    console.log('🔍 Configuration includes:', includeConfig.length, 'éléments');
+
+    // EXÉCUTER LA REQUÊTE COMPLÈTE
+    const { count, rows: appointments } = await Appointment.findAndCountAll({
+      where: whereClause,
+      include: includeConfig.length > 0 ? includeConfig : [],
       order: [['appointmentDate', 'DESC']],
       limit: parseInt(limit),
       offset: parseInt(offset)
     });
 
-    console.log(`✅ ${appointments.length} rendez-vous trouvés`);
+    console.log(`✅ ${appointments.length} rendez-vous trouvés avec succès`);
 
     res.json({
       success: true,
@@ -207,16 +258,21 @@ const getAppointments = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la récupération des rendez-vous:', error);
+    console.error('❌ Erreur lors de la récupération des rendez-vous:', {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+      role: req.user?.role
+    });
     res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de la récupération des rendez-vous',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Erreur interne'
     });
   }
 };
 
-// Récupérer un rendez-vous par ID
+// Récupérer un rendez-vous par ID - VERSION SIMPLIFIÉE
 const getAppointmentById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -233,26 +289,9 @@ const getAppointmentById = async (req, res) => {
       whereCondition.doctorId = userId;
     }
 
+    // Version simplifiée sans includes pour commencer
     const appointment = await Appointment.findOne({
-      where: whereCondition,
-      include: [
-        {
-          model: User,
-          as: 'patient',
-          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'dateOfBirth', 'gender']
-        },
-        {
-          model: User,
-          as: 'doctor',
-          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'specialty', 'licenseNumber', 'biography', 'consultationPrice', 'languages']
-        },
-        {
-          model: Payment,
-          as: 'payment',
-          attributes: ['id', 'amount', 'status', 'paymentMethod'],
-          required: false
-        }
-      ]
+      where: whereCondition
     });
 
     if (!appointment) {
@@ -287,12 +326,7 @@ const updateAppointmentStatus = async (req, res) => {
 
     console.log(`🔄 Mise à jour du statut du rendez-vous ${id}...`);
 
-    const appointment = await Appointment.findByPk(id, {
-      include: [
-        { model: User, as: 'patient' },
-        { model: User, as: 'doctor' }
-      ]
-    });
+    const appointment = await Appointment.findByPk(id);
 
     if (!appointment) {
       return res.status(404).json({
