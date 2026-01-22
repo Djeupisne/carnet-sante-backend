@@ -189,6 +189,12 @@ const User = sequelize.define('User', {
     beforeCreate: async (user) => {
       try {
         console.log('Hook beforeCreate - User:', user.email, 'Role:', user.role);
+        console.log('Données reçues dans hook:', {
+          specialty: user.specialty,
+          licenseNumber: user.licenseNumber,
+          biography: user.biography,
+          languages: user.languages
+        });
         
         // Générer le code unique si manquant
         if (!user.uniqueCode) {
@@ -202,14 +208,30 @@ const User = sequelize.define('User', {
           console.log('Mot de passe hashé avec succès');
         }
 
-        // Gérer seulement les conversions nécessaires
-        if (user.role === 'doctor') {
-          // Pour les médecins, s'assurer que languages est un tableau
-          if (!user.languages || !Array.isArray(user.languages)) {
+        // ✅ CORRIGÉ : Formatage des langues
+        if (user.languages) {
+          if (typeof user.languages === 'string') {
+            try {
+              // Essayer de parser si c'est une string JSON
+              user.languages = JSON.parse(user.languages);
+            } catch (e) {
+              // Sinon, créer un tableau avec la string
+              user.languages = [user.languages];
+            }
+          }
+          if (!Array.isArray(user.languages)) {
             user.languages = [];
           }
-          console.log('Champs doctor initialisés');
+        } else if (user.role === 'doctor') {
+          // Pour les médecins, initialiser un tableau vide si pas de langues
+          user.languages = [];
         }
+
+        // ✅ CORRIGÉ : NE PAS NETTOYER LES CHAMPS MÉDECIN
+        // Les champs specialty, licenseNumber, biography DOIVENT être conservés
+        console.log('Avant hook - Spécialité:', user.specialty);
+        console.log('Avant hook - License:', user.licenseNumber);
+        console.log('Avant hook - Biographie:', user.biography);
 
         // Nettoyer bloodType si vide
         if (user.bloodType === '' || user.bloodType === null) {
@@ -217,6 +239,8 @@ const User = sequelize.define('User', {
         }
 
         console.log('✅ Hooks beforeCreate terminés avec succès');
+        console.log('Après hook - Spécialité:', user.specialty);
+        console.log('Après hook - License:', user.licenseNumber);
 
       } catch (error) {
         console.error('❌ Erreur dans beforeCreate:', error);
@@ -226,24 +250,28 @@ const User = sequelize.define('User', {
     
     beforeUpdate: async (user) => {
       try {
+        console.log('Hook beforeUpdate - User:', user.email, 'Changements:', user.changed());
+        console.log('Rôle actuel:', user.role, 'Rôle précédent:', user._previousDataValues?.role);
+        
+        // ❌ SUPPRIMÉ : Logique de nettoyage basée sur le rôle
+        // Le rôle ne doit JAMAIS nettoyer automatiquement les champs
+        
         if (user.changed('password')) {
           console.log('Hook beforeUpdate - Hachage du nouveau mot de passe');
           user.password = await bcrypt.hash(user.password, 12);
         }
 
-        // Logique de nettoyage simplifiée
-        if (user.changed('role')) {
-          if (user.role === 'patient') {
-            // Nettoyer seulement si explicitement changé en patient
-            user.specialty = null;
-            user.licenseNumber = null;
-            user.biography = null;
-            user.languages = null;
-            user.consultationPrice = 0.00;
-          } else if (user.role === 'doctor') {
-            if (!user.languages || !Array.isArray(user.languages)) {
-              user.languages = [];
+        // ✅ Formatage des langues si elles changent
+        if (user.changed('languages') && user.languages) {
+          if (typeof user.languages === 'string') {
+            try {
+              user.languages = JSON.parse(user.languages);
+            } catch (e) {
+              user.languages = [user.languages];
             }
+          }
+          if (!Array.isArray(user.languages)) {
+            user.languages = [];
           }
         }
 
@@ -251,6 +279,8 @@ const User = sequelize.define('User', {
         if (user.changed('bloodType') && (user.bloodType === '' || user.bloodType === null)) {
           user.bloodType = null;
         }
+
+        console.log('✅ beforeUpdate terminé');
 
       } catch (error) {
         console.error('❌ Erreur dans beforeUpdate:', error);
@@ -261,7 +291,7 @@ const User = sequelize.define('User', {
 });
 
 /**
- * MÉTHODE ASSOCIATE (AJOUT CRITIQUE)
+ * MÉTHODE ASSOCIATE
  */
 User.associate = function(models) {
   if (models.Appointment) {
