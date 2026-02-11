@@ -1,5 +1,6 @@
 const { validationResult, body } = require('express-validator');
 const { logger } = require('../utils/logger');
+
 const handleValidationErrors = (req, res, next) => {
   console.log('\n🔍 === MIDDLEWARE VALIDATION ===');
   const errors = validationResult(req);
@@ -26,9 +27,12 @@ const handleValidationErrors = (req, res, next) => {
   console.log('✓ Validation réussie');
   next();
 };
+
 const sanitizeInput = (req, res, next) => {
   console.log('\n🧹 === MIDDLEWARE SANITIZE ===');
   console.log('Body avant sanitize:', req.body);
+  
+  // ✅ UNIQUEMENT nettoyer, JAMAIS ajouter des valeurs par défaut !
   if (req.body.firstName && typeof req.body.firstName === 'string') {
     req.body.firstName = req.body.firstName.trim();
   }
@@ -50,15 +54,13 @@ const sanitizeInput = (req, res, next) => {
   if (req.body.biography && typeof req.body.biography === 'string') {
     req.body.biography = req.body.biography.trim();
   }
-  if (req.body.role === 'doctor' || req.body.role === 'docteur' || req.body.role === 'médecin') {
-    if (!req.body.specialty) req.body.specialty = 'généraliste';
-    if (!req.body.licenseNumber) req.body.licenseNumber = 'LIC-' + Date.now();
-    if (!req.body.biography) req.body.biography = 'Médecin généraliste';
-    if (!req.body.languages) req.body.languages = [];
-  }
+
+  // ✅ BLOC SUPPRIMÉ - PLUS AUCUNE VALEUR PAR DÉFAUT AUTOMATIQUE !
+
   console.log('Body après sanitize:', req.body);
   next();
 };
+
 const registerValidation = [
   body('email')
     .isEmail()
@@ -167,6 +169,7 @@ const registerValidation = [
     return true;
   })
 ];
+
 const loginValidation = [
   body('email')
     .isEmail()
@@ -177,6 +180,7 @@ const loginValidation = [
     .notEmpty()
     .withMessage('Mot de passe requis')
 ];
+
 const resetPasswordValidation = [
   body('token')
     .trim()
@@ -186,12 +190,14 @@ const resetPasswordValidation = [
     .isLength({ min: 6 })
     .withMessage('Le mot de passe doit contenir au moins 6 caractères')
 ];
+
 const forgotPasswordValidation = [
   body('email')
     .isEmail()
     .normalizeEmail()
     .withMessage('Email invalide')
 ];
+
 module.exports = {
   handleValidationErrors,
   sanitizeInput,
