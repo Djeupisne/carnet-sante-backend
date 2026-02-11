@@ -116,6 +116,31 @@ app.use(express.urlencoded({
   limit: '50mb'
 }));
 
+// 🔍 MIDDLEWARE DE DEBUG CRITIQUE - DOIT ÊTRE JUSTE APRÈS express.json()
+app.use((req, res, next) => {
+  if (req.path === '/api/auth/register' || req.path === '/api/auth/login') {
+    console.log('\n🔍 === DEBUG: BODY REÇU PAR EXPRESS ===');
+    console.log('📍 Path:', req.path);
+    console.log('📋 Method:', req.method);
+    console.log('📦 Headers Content-Type:', req.headers['content-type']);
+    console.log('📦 Headers Origin:', req.headers.origin);
+    console.log('📦 Body complet:', JSON.stringify(req.body, null, 2));
+    console.log('🔑 Clés présentes dans body:', Object.keys(req.body));
+    console.log('🔍 Vérification des champs critiques:');
+    console.log('   - email présent?', 'email' in req.body, '→', req.body.email);
+    console.log('   - password présent?', 'password' in req.body, '→', req.body.password ? '***' : 'vide');
+    console.log('   - firstName présent?', 'firstName' in req.body, '→', req.body.firstName);
+    console.log('   - lastName présent?', 'lastName' in req.body, '→', req.body.lastName);
+    console.log('   - specialty présent?', 'specialty' in req.body, '→', req.body.specialty);
+    console.log('   - licenseNumber présent?', 'licenseNumber' in req.body, '→', req.body.licenseNumber);
+    console.log('   - biography présent?', 'biography' in req.body, '→', req.body.biography);
+    console.log('   - languages présent?', 'languages' in req.body, '→', req.body.languages);
+    console.log('   - role présent?', 'role' in req.body, '→', req.body.role);
+    console.log('===========================================\n');
+  }
+  next();
+});
+
 // Servir les fichiers statiques
 app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
   setHeaders: (res, path) => {
@@ -319,6 +344,7 @@ const startServer = async () => {
       console.log(`❤️  Health check: http://localhost:${PORT}/health`);
       console.log(`🔧 Test CORS: http://localhost:${PORT}/api/cors-test`);
       console.log(`🛡️  Trust proxy: ✅ Configuré (array)`);
+      console.log(`🔍 Debug middleware: ✅ Activé pour /api/auth/register`);
       console.log('\n📍 URLs autorisées CORS:');
       console.log('   ✅ https://carnet-sante-frontend.onrender.com');
       console.log('   ✅ http://localhost:3000');
