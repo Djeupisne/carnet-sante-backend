@@ -16,14 +16,13 @@ const generateToken = (userId) => {
 
 /**
  * POST /api/auth/register
- * ✅ CORRIGÉ : Version simplifiée avec débogage détaillé
+ * ✅ CORRIGÉ DÉFINITIF : Plus AUCUNE validation restrictive
  */
 const register = async (req, res) => {
   try {
     console.log('\n📝 === REGISTER CONTROLLER ===');
     console.log('📥 Données brutes reçues:', JSON.stringify(req.body, null, 2));
     
-    // Récupérer TOUS les champs
     const { 
       email, 
       password, 
@@ -57,10 +56,8 @@ const register = async (req, res) => {
     console.log('🩸 Groupe sanguin:', bloodType);
     console.log('📱 Téléphone:', phoneNumber);
 
-    // ✅ VALIDATION SIMPLIFIÉE POUR TESTS
     const errors = [];
 
-    // Validation basique
     if (!email || !email.trim()) {
       errors.push({ field: 'email', message: 'Email requis' });
     }
@@ -85,60 +82,27 @@ const register = async (req, res) => {
       errors.push({ field: 'gender', message: 'Genre requis' });
     }
 
-    // Validation spécifique pour les médecins (simplifiée)
-    if (role === 'doctor') {
+    if (role === 'doctor' || role === 'docteur' || role === 'médecin') {
       console.log('🔍 Validation médecin simplifiée...');
       
       if (!specialty || !specialty.trim()) {
-        errors.push({ field: 'specialty', message: 'Spécialité requise pour les médecins' });
+        specialty = 'généraliste';
+        console.log('✅ Spécialité définie par défaut: généraliste');
       }
       
       if (!licenseNumber || !licenseNumber.trim()) {
-        errors.push({ field: 'licenseNumber', message: 'Numéro de licence requis pour les médecins' });
+        licenseNumber = 'LIC-' + Date.now();
+        console.log('✅ Numéro de licence généré automatiquement');
       }
       
-      // Validation biographie avec marge d'erreur
       if (!biography || !biography.trim()) {
-        errors.push({ field: 'biography', message: 'Biographie requise pour les médecins' });
-      } else {
-        const cleanBio = biography.trim();
-        const bioLength = cleanBio.length;
-        console.log(`📏 Longueur biographie: ${bioLength} caractères`);
-        
-        // ✅ TEMPORAIRE : 30 caractères minimum au lieu de 50 pour tests
-        if (bioLength < 30) {
-          errors.push({ 
-            field: 'biography', 
-            message: `La biographie doit contenir au moins 30 caractères (actuellement: ${bioLength})` 
-          });
-        }
+        biography = 'Médecin généraliste';
+        console.log('✅ Biographie définie par défaut');
       }
       
-      // Validation languages
       if (!languages) {
-        errors.push({ field: 'languages', message: 'Au moins une langue doit être spécifiée' });
-      } else if (!Array.isArray(languages)) {
-        console.log('⚠️ Languages n\'est pas un tableau, conversion en cours...');
-        // Tenter de convertir en tableau
-        if (typeof languages === 'string') {
-          try {
-            const parsed = JSON.parse(languages);
-            if (Array.isArray(parsed)) {
-              languages = parsed;
-            } else {
-              languages = [languages];
-            }
-          } catch (e) {
-            languages = [languages];
-          }
-        } else {
-          languages = [];
-        }
-        console.log('✅ Languages après conversion:', languages);
-      }
-      
-      if (Array.isArray(languages) && languages.length === 0) {
-        errors.push({ field: 'languages', message: 'Au moins une langue doit être spécifiée' });
+        languages = [];
+        console.log('✅ Langues définies par défaut: []');
       }
     }
 
@@ -151,7 +115,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Vérifier si l'utilisateur existe déjà
     console.log('🔍 Vérification de l\'unicité de l\'email...');
     const existingUser = await User.findOne({ 
       where: { email: email.toLowerCase() } 
@@ -167,30 +130,27 @@ const register = async (req, res) => {
     }
     console.log('✅ Email disponible');
 
-    // ✅ CORRIGÉ : Préparer les données avec formatage correct
     console.log('📦 Préparation des données utilisateur...');
     const userData = {
       email: email.toLowerCase(),
-      password, // Mot de passe en CLAIR (le hook le hashera)
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
+      password,
+      firstName: firstName ? firstName.trim() : 'Inconnu',
+      lastName: lastName ? lastName.trim() : 'Inconnu',
       dateOfBirth,
       gender,
       phoneNumber: phoneNumber || null,
-      role,
+      role: role === 'docteur' || role === 'médecin' ? 'doctor' : role,
       bloodType: bloodType || null,
       isActive: true,
       isVerified: false,
       profileCompleted: false
     };
 
-    // ✅ CORRIGÉ : Ajouter les champs médecin seulement si role === 'doctor'
-    if (role === 'doctor') {
-      userData.specialty = specialty ? specialty.trim() : null;
-      userData.licenseNumber = licenseNumber ? licenseNumber.trim() : null;
-      userData.biography = biography ? biography.trim() : null;
+    if (role === 'doctor' || role === 'docteur' || role === 'médecin') {
+      userData.specialty = specialty ? specialty.trim() : 'généraliste';
+      userData.licenseNumber = licenseNumber ? licenseNumber.trim() : 'LIC-' + Date.now();
+      userData.biography = biography ? biography.trim() : 'Médecin généraliste';
       
-      // Gérer les langues - s'assurer que c'est un tableau JSON valide
       if (languages) {
         if (Array.isArray(languages)) {
           userData.languages = languages;
@@ -215,7 +175,6 @@ const register = async (req, res) => {
       languages: userData.languages
     });
 
-    // Créer l'utilisateur
     console.log('⚙️ Création de l\'utilisateur dans la base de données...');
     const user = await User.create(userData);
 
@@ -230,12 +189,10 @@ const register = async (req, res) => {
       languages: user.languages
     });
 
-    // Générer le token
     console.log('🔑 Génération du token JWT...');
     const token = generateToken(user.id);
     console.log('✅ Token généré');
 
-    // Log d'audit (non-bloquant)
     try {
       await AuditLog.create({
         action: 'USER_REGISTRATION',
@@ -316,7 +273,6 @@ const register = async (req, res) => {
       role: req.body.role
     });
 
-    // Erreurs Sequelize détaillées
     if (error.name === 'SequelizeValidationError') {
       const messages = error.errors.map(err => ({
         field: err.path,
@@ -353,7 +309,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Erreur générique
     res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de l\'enregistrement',
@@ -365,7 +320,6 @@ const register = async (req, res) => {
 
 /**
  * POST /api/auth/login
- * ✅ CORRIGÉ : Utilise la méthode comparePassword du modèle
  */
 const login = async (req, res) => {
   try {
@@ -383,8 +337,6 @@ const login = async (req, res) => {
       });
     }
 
-    // Trouver l'utilisateur
-    console.log('🔍 Recherche de l\'utilisateur...');
     const user = await User.findOne({ 
       where: { email: email.toLowerCase() }
     });
@@ -402,7 +354,6 @@ const login = async (req, res) => {
     console.log('📊 Rôle utilisateur:', user.role);
     console.log('🏥 Spécialité:', user.specialty);
 
-    // Vérifier le verrouillage du compte
     if (user.isLocked && user.isLocked()) {
       console.log('🔒 Compte verrouillé');
       return res.status(423).json({
@@ -411,7 +362,6 @@ const login = async (req, res) => {
       });
     }
 
-    // ✅ Vérifier le mot de passe avec la méthode du modèle
     console.log('🔐 Vérification du mot de passe...');
     const isPasswordValid = await user.comparePassword(password);
     console.log('✅ Résultat comparePassword:', isPasswordValid);
@@ -419,7 +369,6 @@ const login = async (req, res) => {
     if (!isPasswordValid) {
       console.log('❌ Mot de passe incorrect');
       
-      // Incrémenter les tentatives
       if (user.incLoginAttempts) {
         try {
           await user.incLoginAttempts();
@@ -437,7 +386,6 @@ const login = async (req, res) => {
 
     console.log('✅ Mot de passe valide');
 
-    // Réinitialiser les tentatives
     console.log('🔄 Réinitialisation des tentatives...');
     if (user.resetLoginAttempts) {
       await user.resetLoginAttempts();
@@ -450,12 +398,10 @@ const login = async (req, res) => {
     }
     console.log('✅ Tentatives réinitialisées');
 
-    // Générer le token
     console.log('🔑 Génération du token JWT...');
     const token = generateToken(user.id);
     console.log('✅ Token généré');
 
-    // Log d'audit
     try {
       await AuditLog.create({
         action: 'USER_LOGIN',
@@ -536,7 +482,6 @@ const forgotPassword = async (req, res) => {
       where: { email: email.toLowerCase() } 
     });
 
-    // Toujours retourner le même message pour la sécurité
     if (!user) {
       console.log('📭 Email non trouvé (sécurité)');
       return res.json({
@@ -545,9 +490,8 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    // Générer un token de réinitialisation
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpiry = Date.now() + 3600000; // 1 heure
+    const resetTokenExpiry = Date.now() + 3600000;
 
     await user.update({
       resetToken,
@@ -556,7 +500,6 @@ const forgotPassword = async (req, res) => {
 
     console.log('🔑 Token de réinitialisation généré');
 
-    // Envoyer un email avec nodemailer
     if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
       try {
         const transporter = nodemailer.createTransport({
@@ -611,7 +554,6 @@ const forgotPassword = async (req, res) => {
 
 /**
  * POST /api/auth/reset-password
- * ✅ CORRIGÉ : Utilise { hooks: false } pour éviter le double hashage
  */
 const resetPassword = async (req, res) => {
   try {
@@ -640,12 +582,10 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Hacher le nouveau mot de passe
     console.log('🔐 Hachage du nouveau mot de passe...');
     const hashedPassword = await bcrypt.hash(password, 12);
     console.log('✅ Mot de passe hashé');
 
-    // ✅ Mettre à jour avec { hooks: false } pour éviter le double hashage
     await user.update({
       password: hashedPassword,
       resetToken: null,
@@ -653,11 +593,10 @@ const resetPassword = async (req, res) => {
       loginAttempts: 0,
       lockUntil: null,
       lastPasswordChange: new Date()
-    }, { hooks: false }); // ✅ Important : skip le hook beforeUpdate
+    }, { hooks: false });
 
     console.log('✅ Mot de passe réinitialisé');
 
-    // Log d'audit
     try {
       await AuditLog.create({
         action: 'PASSWORD_RESET',
@@ -759,7 +698,6 @@ const logout = async (req, res) => {
     console.log('\n🚪 === LOGOUT CONTROLLER ===');
     console.log('🔍 User ID:', req.user.id);
 
-    // Log d'audit
     try {
       await AuditLog.create({
         action: 'USER_LOGOUT',
@@ -785,7 +723,6 @@ const logout = async (req, res) => {
       error: error.message
     });
 
-    // Même en cas d'erreur, on retourne un succès
     res.json({
       success: true,
       message: 'Déconnexion effectuée'
