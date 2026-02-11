@@ -16,7 +16,7 @@ const generateToken = (userId) => {
 
 /**
  * POST /api/auth/register
- * ✅ CORRIGÉ DÉFINITIF : Plus AUCUNE validation restrictive
+ * ✅ CORRIGÉ DÉFINITIF : Plus AUCUNE valeur par défaut forcée
  */
 const register = async (req, res) => {
   try {
@@ -82,27 +82,45 @@ const register = async (req, res) => {
       errors.push({ field: 'gender', message: 'Genre requis' });
     }
 
+    // ✅ CORRIGÉ : Plus AUCUNE valeur par défaut automatique !
     if (role === 'doctor' || role === 'docteur' || role === 'médecin') {
-      console.log('🔍 Validation médecin simplifiée...');
+      console.log('🔍 Validation médecin...');
       
       if (!specialty || !specialty.trim()) {
-        specialty = 'généraliste';
-        console.log('✅ Spécialité définie par défaut: généraliste');
+        errors.push({ field: 'specialty', message: 'Spécialité requise pour les médecins' });
       }
       
       if (!licenseNumber || !licenseNumber.trim()) {
-        licenseNumber = 'LIC-' + Date.now();
-        console.log('✅ Numéro de licence généré automatiquement');
+        errors.push({ field: 'licenseNumber', message: 'Numéro de licence requis pour les médecins' });
       }
       
       if (!biography || !biography.trim()) {
-        biography = 'Médecin généraliste';
-        console.log('✅ Biographie définie par défaut');
+        errors.push({ field: 'biography', message: 'Biographie requise pour les médecins' });
       }
       
       if (!languages) {
-        languages = [];
-        console.log('✅ Langues définies par défaut: []');
+        errors.push({ field: 'languages', message: 'Au moins une langue doit être spécifiée' });
+      } else if (!Array.isArray(languages)) {
+        console.log('⚠️ Languages n\'est pas un tableau, conversion en cours...');
+        if (typeof languages === 'string') {
+          try {
+            const parsed = JSON.parse(languages);
+            if (Array.isArray(parsed)) {
+              languages = parsed;
+            } else {
+              languages = [languages];
+            }
+          } catch (e) {
+            languages = [languages];
+          }
+        } else {
+          languages = [];
+        }
+        console.log('✅ Languages après conversion:', languages);
+      }
+      
+      if (Array.isArray(languages) && languages.length === 0) {
+        errors.push({ field: 'languages', message: 'Au moins une langue doit être spécifiée' });
       }
     }
 
@@ -134,8 +152,8 @@ const register = async (req, res) => {
     const userData = {
       email: email.toLowerCase(),
       password,
-      firstName: firstName ? firstName.trim() : 'Inconnu',
-      lastName: lastName ? lastName.trim() : 'Inconnu',
+      firstName: firstName ? firstName.trim() : null,
+      lastName: lastName ? lastName.trim() : null,
       dateOfBirth,
       gender,
       phoneNumber: phoneNumber || null,
@@ -146,10 +164,11 @@ const register = async (req, res) => {
       profileCompleted: false
     };
 
+    // ✅ CORRIGÉ : On garde EXACTEMENT ce que l'utilisateur a saisi !
     if (role === 'doctor' || role === 'docteur' || role === 'médecin') {
-      userData.specialty = specialty ? specialty.trim() : 'généraliste';
-      userData.licenseNumber = licenseNumber ? licenseNumber.trim() : 'LIC-' + Date.now();
-      userData.biography = biography ? biography.trim() : 'Médecin généraliste';
+      userData.specialty = specialty ? specialty.trim() : null;
+      userData.licenseNumber = licenseNumber ? licenseNumber.trim() : null;
+      userData.biography = biography ? biography.trim() : null;
       
       if (languages) {
         if (Array.isArray(languages)) {
@@ -171,6 +190,8 @@ const register = async (req, res) => {
     console.log('📤 Données utilisateur pour création (sans password):', {
       ...userData,
       password: '*** SERA HASHÉ PAR LE HOOK ***',
+      specialty: userData.specialty,
+      licenseNumber: userData.licenseNumber,
       biography: userData.biography ? userData.biography.substring(0, 50) + '...' : null,
       languages: userData.languages
     });
@@ -183,7 +204,7 @@ const register = async (req, res) => {
       email: user.email,
       uniqueCode: user.uniqueCode,
       role: user.role,
-      specialty: user.specialty,
+      specialty: user.specialty, // ✅ C'est la VRAIE valeur saisie !
       licenseNumber: user.licenseNumber,
       biographyLength: user.biography ? user.biography.length : 0,
       languages: user.languages
@@ -235,7 +256,7 @@ const register = async (req, res) => {
           dateOfBirth: user.dateOfBirth,
           phoneNumber: user.phoneNumber,
           bloodType: user.bloodType,
-          specialty: user.specialty,
+          specialty: user.specialty, // ✅ La VRAIE valeur !
           licenseNumber: user.licenseNumber,
           biography: user.biography,
           languages: user.languages,
