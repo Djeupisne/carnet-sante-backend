@@ -41,7 +41,11 @@ class AuthService {
         email: userData.email,
         firstName: userData.firstName,
         lastName: userData.lastName,
-        role: userData.role
+        role: userData.role,
+        specialty: userData.specialty,
+        licenseNumber: userData.licenseNumber,
+        biographyLength: userData.biography ? userData.biography.length : 0,
+        languages: userData.languages
       });
 
       // Étape 1: Validation
@@ -72,9 +76,9 @@ class AuthService {
       }
       console.log('✓ Email disponible');
 
-      // Étape 3: Créer l'utilisateur
-      console.log('Étape 3: Création de l\'utilisateur');
-      const user = await User.create({
+      // Étape 3: Préparer les données utilisateur
+      console.log('Étape 3: Préparation des données utilisateur');
+      const userDataToCreate = {
         email: userData.email.toLowerCase(),
         password: userData.password,
         firstName: userData.firstName.trim(),
@@ -83,24 +87,48 @@ class AuthService {
         gender: userData.gender,
         phoneNumber: userData.phoneNumber || null,
         role: userData.role || 'patient',
+        bloodType: userData.bloodType || null,
         isActive: true,
         isVerified: false,
         profileCompleted: false
-      });
+      };
+
+      // ✅ Ajouter les champs spécifiques aux médecins
+      if (userData.role === 'doctor' || userData.role === 'docteur' || userData.role === 'médecin') {
+        console.log('🏥 Ajout des données spécifiques médecin...');
+        userDataToCreate.specialty = userData.specialty ? userData.specialty.trim() : null;
+        userDataToCreate.licenseNumber = userData.licenseNumber ? userData.licenseNumber.trim() : null;
+        userDataToCreate.biography = userData.biography ? userData.biography.trim() : null;
+        userDataToCreate.languages = userData.languages || [];
+        
+        console.log('Données médecin ajoutées:', {
+          specialty: userDataToCreate.specialty,
+          licenseNumber: userDataToCreate.licenseNumber,
+          biographyLength: userDataToCreate.biography ? userDataToCreate.biography.length : 0,
+          languages: userDataToCreate.languages
+        });
+      }
+
+      // Étape 4: Créer l'utilisateur
+      console.log('Étape 4: Création de l\'utilisateur');
+      const user = await User.create(userDataToCreate);
 
       console.log('✓ Utilisateur créé avec succès:', {
         id: user.id,
         uniqueCode: user.uniqueCode,
-        email: user.email
+        email: user.email,
+        role: user.role,
+        specialty: user.specialty,
+        licenseNumber: user.licenseNumber
       });
 
-      // Étape 4: Générer le token JWT
-      console.log('Étape 4: Génération du token JWT');
+      // Étape 5: Générer le token JWT
+      console.log('Étape 5: Génération du token JWT');
       const token = this.generateToken(user.id);
       console.log('✓ Token généré');
 
-      // Étape 5: Créer un log d'audit
-      console.log('Étape 5: Création du log d\'audit');
+      // Étape 6: Créer un log d'audit
+      console.log('Étape 6: Création du log d\'audit');
       try {
         await AuditLog.create({
           action: 'USER_REGISTRATION',
@@ -110,7 +138,8 @@ class AuthService {
           details: {
             email: user.email,
             role: user.role,
-            uniqueCode: user.uniqueCode
+            uniqueCode: user.uniqueCode,
+            specialty: user.specialty
           }
         });
         console.log('✓ Log d\'audit créé');
@@ -396,7 +425,7 @@ class AuthService {
    * Formater la réponse utilisateur (exclure les champs sensibles)
    */
   formatUserResponse(user) {
-    return {
+    const response = {
       id: user.id,
       uniqueCode: user.uniqueCode,
       email: user.email,
@@ -406,6 +435,7 @@ class AuthService {
       gender: user.gender,
       dateOfBirth: user.dateOfBirth,
       phoneNumber: user.phoneNumber,
+      bloodType: user.bloodType,
       isActive: user.isActive,
       isVerified: user.isVerified,
       profileCompleted: user.profileCompleted,
@@ -414,6 +444,16 @@ class AuthService {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt
     };
+
+    // ✅ Ajouter les champs spécifiques aux médecins
+    if (user.role === 'doctor') {
+      response.specialty = user.specialty;
+      response.licenseNumber = user.licenseNumber;
+      response.biography = user.biography;
+      response.languages = user.languages;
+    }
+
+    return response;
   }
 }
 
