@@ -16,14 +16,14 @@ const generateToken = (userId) => {
 
 /**
  * POST /api/auth/register
- * ✅ CORRIGÉ DÉFINITIF : Plus AUCUNE valeur par défaut forcée
+ * ✅ CORRIGÉ DÉFINITIF : Plus AUCUNE validation sur les langues
  */
 const register = async (req, res) => {
   try {
     console.log('\n📝 === REGISTER CONTROLLER ===');
     console.log('📥 Données brutes reçues:', JSON.stringify(req.body, null, 2));
     
-    const { 
+    let { 
       email, 
       password, 
       firstName, 
@@ -82,7 +82,7 @@ const register = async (req, res) => {
       errors.push({ field: 'gender', message: 'Genre requis' });
     }
 
-    // ✅ CORRIGÉ : Plus AUCUNE valeur par défaut automatique !
+    // ✅ CORRIGÉ : Plus AUCUNE validation bloquante sur les langues !
     if (role === 'doctor' || role === 'docteur' || role === 'médecin') {
       console.log('🔍 Validation médecin...');
       
@@ -98,8 +98,10 @@ const register = async (req, res) => {
         errors.push({ field: 'biography', message: 'Biographie requise pour les médecins' });
       }
       
+      // ✅ PLUS AUCUNE ERREUR SUR LES LANGUES !
       if (!languages) {
-        errors.push({ field: 'languages', message: 'Au moins une langue doit être spécifiée' });
+        languages = [];
+        console.log('✅ Languages initialisé à []');
       } else if (!Array.isArray(languages)) {
         console.log('⚠️ Languages n\'est pas un tableau, conversion en cours...');
         if (typeof languages === 'string') {
@@ -117,10 +119,6 @@ const register = async (req, res) => {
           languages = [];
         }
         console.log('✅ Languages après conversion:', languages);
-      }
-      
-      if (Array.isArray(languages) && languages.length === 0) {
-        errors.push({ field: 'languages', message: 'Au moins une langue doit être spécifiée' });
       }
     }
 
@@ -204,7 +202,7 @@ const register = async (req, res) => {
       email: user.email,
       uniqueCode: user.uniqueCode,
       role: user.role,
-      specialty: user.specialty, // ✅ C'est la VRAIE valeur saisie !
+      specialty: user.specialty,
       licenseNumber: user.licenseNumber,
       biographyLength: user.biography ? user.biography.length : 0,
       languages: user.languages
@@ -256,7 +254,7 @@ const register = async (req, res) => {
           dateOfBirth: user.dateOfBirth,
           phoneNumber: user.phoneNumber,
           bloodType: user.bloodType,
-          specialty: user.specialty, // ✅ La VRAIE valeur !
+          specialty: user.specialty,
           licenseNumber: user.licenseNumber,
           biography: user.biography,
           languages: user.languages,
