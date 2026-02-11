@@ -3,6 +3,152 @@ const { Appointment, User, Payment, AuditLog, Op } = require('../models');
 const { validationService } = require('../services/validationService');
 const { notificationService } = require('../services/notificationService');
 
+// Récupérer les créneaux disponibles d'un médecin
+const getAvailableSlots = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { date } = req.query;
+
+    console.log(`📅 Récupération des créneaux disponibles pour le médecin ${doctorId}...`);
+
+    // Vérifier que le médecin existe
+    const doctor = await User.findOne({
+      where: { id: doctorId, role: 'doctor', isActive: true }
+    });
+
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Médecin non trouvé'
+      });
+    }
+
+    // Définir les créneaux standards (9h-17h, créneaux de 30min)
+    const startHour = 9;
+    const endHour = 17;
+    const slotDuration = 30;
+    
+    const slots = [];
+    
+    if (date) {
+      const targetDate = new Date(date);
+      targetDate.setHours(startHour, 0, 0, 0);
+      
+      const bookedAppointments = await Appointment.findAll({
+        where: {
+          doctorId,
+          appointmentDate: {
+            [Op.between]: [
+              new Date(new Date(date).setHours(0, 0, 0, 0)),
+              new Date(new Date(date).setHours(23, 59, 59, 999))
+            ]
+          },
+          status: { [Op.in]: ['pending', 'confirmed'] }
+        }
+      });
+
+      const bookedTimes = bookedAppointments.map(apt => 
+        new Date(apt.appointmentDate).getTime()
+      );
+
+      for (let hour = startHour; hour < endHour; hour++) {
+        for (let minute = 0; minute < 60; minute += slotDuration) {
+          const slotTime = new Date(targetDate);
+          slotTime.setHours(hour, minute, 0, 0);
+          
+          const isBooked = bookedTimes.some(bookedTime => 
+            Math.abs(bookedTime - slotTime.getTime()) < slotDuration * 60000
+          );
+          
+          if (!isBooked) {
+            slots.push({
+              time: slotTime.toISOString(),
+              available: true
+            });
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      doctorId,
+      date: date || null,
+      slots,
+      slotDuration
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur lors de la récupération des créneaux disponibles:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur serveur lors de la récupération des créneaux',
+      error: error.message
+    });
+  }
+};
+
+// Récupérer les créneaux occupés d'un médecin
+const getBookedSlots = async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { date } = req.query;
+
+    console.log(`📅 Récupération des créneaux occupés pour le médecin ${doctorId}...`);
+
+    const whereClause = {
+      doctorId,
+      status: { [Op.in]: ['pending', 'confirmed'] }
+    };
+
+    if (date) {
+      whereClause.appointmentDate = {
+        [Op.between]: [
+          new Date(new Date(date).setHours(0, 0, 0, 0)),
+          new Date(new Date(date).setHours(23, 59, 59, 999))
+        ]
+      };
+    }
+
+    const appointments = await Appointment.findAll({
+      where: whereClause,
+      attributes: ['id', 'appointmentDate', 'duration', 'status'],
+      include: [{
+        model: User,
+        as: 'patient',
+        attributes: ['id', 'firstName', 'lastName']
+      }]
+    });
+
+    const slots = appointments.map(apt => ({
+      appointmentId: apt.id,
+      time: apt.appointmentDate,
+      duration: apt.duration,
+      status: apt.status,
+      patient: apt.patient ? {
+        id: apt.patient.id,
+        name: `${apt.patient.firstName} ${apt.patient.lastName}`
+      } : null
+    }));
+
+    res.json({
+      success: true,
+      doctorId,
+      date: date || null,
+      count: slots.length,
+      slots
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur lors de la récupération des créneaux occupés:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur serveur lors de la récupération des créneaux occupés',
+      error: error.message
+    });
+  }
+};
+
 // Créer un nouveau rendez-vous
 const createAppointment = async (req, res) => {
   try {
@@ -19,7 +165,6 @@ const createAppointment = async (req, res) => {
 
     console.log(`📝 Création d'un nouveau rendez-vous pour le patient ${patientId}...`);
 
-    // Validation des données
     if (!doctorId || !appointmentDate || !reason) {
       return res.status(400).json({
         success: false,
@@ -27,7 +172,6 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // Vérifier que le médecin existe et est actif
     const doctor = await User.findOne({
       where: { 
         id: doctorId, 
@@ -43,7 +187,6 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // Vérifier les disponibilités
     const existingAppointment = await Appointment.findOne({
       where: {
         doctorId,
@@ -66,7 +209,6 @@ const createAppointment = async (req, res) => {
       });
     }
 
-    // Créer le rendez-vous
     const appointment = await Appointment.create({
       patientId,
       doctorId,
@@ -78,7 +220,6 @@ const createAppointment = async (req, res) => {
       status: 'pending'
     });
 
-    // Charger les données associées
     const newAppointment = await Appointment.findByPk(appointment.id, {
       include: [
         {
@@ -94,7 +235,6 @@ const createAppointment = async (req, res) => {
       ]
     });
 
-    // Créer une notification pour le médecin
     try {
       await notificationService.createNotification({
         userId: doctorId,
@@ -107,7 +247,6 @@ const createAppointment = async (req, res) => {
       console.warn('⚠️ Erreur lors de la création de la notification:', notifError.message);
     }
 
-    // Log d'audit
     try {
       await AuditLog.create({
         action: 'APPOINTMENT_CREATED',
@@ -142,7 +281,7 @@ const createAppointment = async (req, res) => {
   }
 };
 
-// Récupérer tous les rendez-vous - VERSION CORRIGÉE AVEC DÉBOGAGE
+// Récupérer tous les rendez-vous
 const getAppointments = async (req, res) => {
   try {
     const { page = 1, limit = 20, status, type } = req.query;
@@ -151,19 +290,11 @@ const getAppointments = async (req, res) => {
 
     console.log(`📋 Récupération des rendez-vous pour l'utilisateur ${userId} (${userRole})...`);
 
-    // DÉBOGAGE: Vérifier les modèles importés
-    console.log('🔍 Vérification des modèles importés:');
-    console.log('- Appointment:', Appointment ? 'OK' : 'NULL');
-    console.log('- User:', User ? 'OK' : 'NULL');
-    console.log('- Payment:', Payment ? 'OK' : 'NULL');
-    console.log('- Op:', Op ? 'OK' : 'NULL');
-
     if (!Appointment || typeof Appointment.findAndCountAll !== 'function') {
       console.error('❌ ERREUR: Modèle Appointment non valide');
       throw new Error('Modèle Appointment non chargé correctement');
     }
 
-    // Construire la requête selon le rôle
     const whereClause = {};
     
     if (userRole === 'patient') {
@@ -172,58 +303,27 @@ const getAppointments = async (req, res) => {
       whereClause.doctorId = userId;
     }
 
-    if (status) {
-      whereClause.status = status;
-    }
-    if (type) {
-      whereClause.type = type;
-    }
+    if (status) whereClause.status = status;
+    if (type) whereClause.type = type;
 
     const offset = (page - 1) * limit;
 
-    // TEST SIMPLE SANS INCLUDES D'ABORD
-    console.log('🔍 Test sans includes...');
-    try {
-      const testResult = await Appointment.findAndCountAll({
-        where: whereClause,
-        limit: 1,
-        offset: 0
-      });
-      console.log(`✅ Test réussi: ${testResult.count} rendez-vous trouvés (sans includes)`);
-    } catch (testError) {
-      console.error('❌ Test échoué:', testError.message);
-      throw testError;
-    }
-
-    // PRÉPARER LES INCLUDES AVEC VÉRIFICATION
     const includeConfig = [];
 
-    // Vérifier et ajouter l'inclusion du patient
     if (User && typeof User === 'function') {
-      try {
-        // Vérifier si l'association existe
-        const associations = Appointment.associations;
-        console.log('🔍 Associations de Appointment:', Object.keys(associations || {}));
-        
-        includeConfig.push({
-          model: User,
-          as: 'patient',
-          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'dateOfBirth', 'gender']
-        });
-        
-        includeConfig.push({
-          model: User,
-          as: 'doctor',
-          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'specialty', 'licenseNumber', 'biography', 'consultationPrice', 'languages']
-        });
-      } catch (assocError) {
-        console.warn('⚠️ Erreur avec les associations User:', assocError.message);
-      }
-    } else {
-      console.warn('⚠️ Modèle User non disponible pour les includes');
+      includeConfig.push({
+        model: User,
+        as: 'patient',
+        attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'dateOfBirth', 'gender']
+      });
+      
+      includeConfig.push({
+        model: User,
+        as: 'doctor',
+        attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'specialty', 'licenseNumber', 'biography', 'consultationPrice', 'languages']
+      });
     }
 
-    // Vérifier et ajouter l'inclusion du paiement
     if (Payment && typeof Payment === 'function') {
       includeConfig.push({
         model: Payment,
@@ -233,9 +333,6 @@ const getAppointments = async (req, res) => {
       });
     }
 
-    console.log('🔍 Configuration includes:', includeConfig.length, 'éléments');
-
-    // EXÉCUTER LA REQUÊTE COMPLÈTE
     const { count, rows: appointments } = await Appointment.findAndCountAll({
       where: whereClause,
       include: includeConfig.length > 0 ? includeConfig : [],
@@ -244,7 +341,7 @@ const getAppointments = async (req, res) => {
       offset: parseInt(offset)
     });
 
-    console.log(`✅ ${appointments.length} rendez-vous trouvés avec succès`);
+    console.log(`✅ ${appointments.length} rendez-vous trouvés`);
 
     res.json({
       success: true,
@@ -272,7 +369,7 @@ const getAppointments = async (req, res) => {
   }
 };
 
-// Récupérer un rendez-vous par ID - VERSION SIMPLIFIÉE
+// Récupérer un rendez-vous par ID
 const getAppointmentById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -289,7 +386,6 @@ const getAppointmentById = async (req, res) => {
       whereCondition.doctorId = userId;
     }
 
-    // Version simplifiée sans includes pour commencer
     const appointment = await Appointment.findOne({
       where: whereCondition
     });
@@ -626,8 +722,10 @@ const rateAppointment = async (req, res) => {
   }
 };
 
-// Export de toutes les fonctions
+// EXPORT DE TOUTES LES FONCTIONS
 module.exports = {
+  getAvailableSlots,
+  getBookedSlots,
   createAppointment,
   getAppointments,
   getAppointmentById,
