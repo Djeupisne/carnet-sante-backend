@@ -7,7 +7,7 @@ const {
   createAppointment,
   getAppointments,
   cancelAppointment
-} = require('../controllers/appointment');
+} = require('../controllers/appointmentController'); // ✅ CORRIGÉ !
 
 // Routes publiques (ou semi-publiques)
 // ✅ Récupérer les créneaux disponibles d'un médecin
