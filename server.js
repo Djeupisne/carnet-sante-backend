@@ -322,20 +322,8 @@ const startServer = async () => {
   try {
     console.log('🚀 Démarrage du serveur Carnet de Santé...');
     
-    const dbConnected = await testConnection();
-    if (!dbConnected) {
-      throw new Error('❌ Impossible de se connecter à la base de données');
-    }
-    
-    console.log('🔄 Synchronisation des modèles...');
-    await sequelize.sync({ 
-      alter: false,
-      force: false,
-      logging: false
-    });
-    console.log('✅ Modèles synchronisés');
-    
-    app.listen(PORT, '0.0.0.0', () => {
+    // ✅ CRITIQUE : Démarrer le serveur IMMÉDIATEMENT pour que Render détecte le port
+    const server = app.listen(PORT, '0.0.0.0', () => {
       console.log('\n🎉 SERVEUR DÉMARRÉ AVEC SUCCÈS!');
       console.log('=================================');
       console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
@@ -350,9 +338,26 @@ const startServer = async () => {
       console.log('   ✅ http://localhost:3000');
       console.log('=================================\n');
     });
+    
+    // Connecter à la DB après que le serveur soit démarré
+    console.log('🔄 Connexion à la base de données...');
+    const dbConnected = await testConnection();
+    if (!dbConnected) {
+      console.warn('⚠️ Impossible de se connecter à la base de données, mais le serveur continue');
+    } else {
+      console.log('✅ Base de données connectée');
+      
+      console.log('🔄 Synchronisation des modèles...');
+      await sequelize.sync({ 
+        alter: false,
+        force: false,
+        logging: false
+      });
+      console.log('✅ Modèles synchronisés');
+    }
   } catch (error) {
-    console.error('❌ CRITIQUE: Impossible de démarrer le serveur:', error);
-    process.exit(1);
+    console.error('❌ ERREUR lors du démarrage:', error);
+    // Ne pas exit(1) - le serveur peut fonctionner sans DB pour les health checks
   }
 };
 
