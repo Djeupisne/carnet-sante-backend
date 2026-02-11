@@ -30,9 +30,107 @@ const handleValidationErrors = (req, res, next) => {
 
 const sanitizeInput = (req, res, next) => {
   console.log('\n🧹 === MIDDLEWARE SANITIZE ===');
-  console.log('Body avant sanitize:', req.body);
+  console.log('Body avant sanitize:', JSON.stringify(req.body, null, 2));
   
-  // ✅ UNIQUEMENT nettoyer les chaînes existantes
+  // ✅ 1. NORMALISER LES NOMS DE CHAMPS FRANÇAIS VERS ANGLAIS
+  // Prénom / firstName
+  if (req.body['Prénom'] || req.body['prénom']) {
+    req.body.firstName = (req.body['Prénom'] || req.body['prénom']).trim();
+    delete req.body['Prénom'];
+    delete req.body['prénom'];
+  }
+  
+  // Nom / lastName
+  if (req.body['Nom de famille'] || req.body['NomDenom'] || req.body['nomDenom'] || req.body['Nom']) {
+    req.body.lastName = (req.body['Nom de famille'] || req.body['NomDenom'] || req.body['nomDenom'] || req.body['Nom']).trim();
+    delete req.body['Nom de famille'];
+    delete req.body['NomDenom'];
+    delete req.body['nomDenom'];
+    delete req.body['Nom'];
+  }
+  
+  // Email
+  if (req.body['Email'] || req.body['email']) {
+    req.body.email = (req.body['Email'] || req.body['email']).toLowerCase().trim();
+    delete req.body['Email'];
+  }
+  
+  // Mot de passe / password
+  if (req.body['mot de passe'] || req.body['Mot de passe']) {
+    req.body.password = req.body['mot de passe'] || req.body['Mot de passe'];
+    delete req.body['mot de passe'];
+    delete req.body['Mot de passe'];
+  }
+  
+  // Rôle / role
+  if (req.body['Rôle'] || req.body['rôle'] || req.body['role']) {
+    req.body.role = (req.body['Rôle'] || req.body['rôle'] || req.body['role']).trim();
+    delete req.body['Rôle'];
+    delete req.body['rôle'];
+  }
+  
+  // Date de naissance / dateOfBirth
+  if (req.body['dateDeNaissance'] || req.body['DateDeNaissance'] || req.body['dateDeNaissance']) {
+    req.body.dateOfBirth = req.body['dateDeNaissance'] || req.body['DateDeNaissance'];
+    delete req.body['dateDeNaissance'];
+    delete req.body['DateDeNaissance'];
+  }
+  
+  // Genre / gender
+  if (req.body['Genre'] || req.body['genre']) {
+    let gender = (req.body['Genre'] || req.body['genre']).trim().toLowerCase();
+    if (gender === 'homme' || gender === 'masculin') gender = 'male';
+    if (gender === 'femme' || gender === 'féminin') gender = 'female';
+    if (gender === 'autre') gender = 'other';
+    req.body.gender = gender;
+    delete req.body['Genre'];
+    delete req.body['genre'];
+  }
+  
+  // Téléphone / phoneNumber
+  if (req.body['TéléphoneNuméro'] || req.body['NuméroDetéléphone'] || req.body['NuméroDeTéléphone'] || req.body['phoneNumber']) {
+    req.body.phoneNumber = (req.body['TéléphoneNuméro'] || req.body['NuméroDetéléphone'] || req.body['NuméroDeTéléphone'] || req.body['phoneNumber']).trim();
+    delete req.body['TéléphoneNuméro'];
+    delete req.body['NuméroDetéléphone'];
+    delete req.body['NuméroDeTéléphone'];
+  }
+  
+  // Spécialité / specialty
+  if (req.body['Spécialité'] || req.body['spécialité'] || req.body['specialty']) {
+    req.body.specialty = (req.body['Spécialité'] || req.body['spécialité'] || req.body['specialty']).trim();
+    delete req.body['Spécialité'];
+    delete req.body['spécialité'];
+  }
+  
+  // Numéro de licence / licenseNumber
+  if (req.body['NuméroLicence'] || req.body['numéroLicence'] || req.body['licenseNumber']) {
+    req.body.licenseNumber = (req.body['NuméroLicence'] || req.body['numéroLicence'] || req.body['licenseNumber']).trim();
+    delete req.body['NuméroLicence'];
+    delete req.body['numéroLicence'];
+  }
+  
+  // Biographie / biography
+  if (req.body['biographie'] || req.body['Biographie'] || req.body['biography']) {
+    req.body.biography = (req.body['biographie'] || req.body['Biographie'] || req.body['biography']).trim();
+    delete req.body['biographie'];
+    delete req.body['Biographie'];
+  }
+  
+  // Langues / languages
+  if (req.body['langues'] || req.body['Langues'] || req.body['languages']) {
+    req.body.languages = req.body['langues'] || req.body['Langues'] || req.body['languages'];
+    delete req.body['langues'];
+    delete req.body['Langues'];
+  }
+  
+  // Groupe sanguin / bloodType
+  if (req.body['groupeSanguin'] || req.body['GroupeSanguin'] || req.body['bloodType']) {
+    req.body.bloodType = req.body['groupeSanguin'] || req.body['GroupeSanguin'] || req.body['bloodType'];
+    delete req.body['groupeSanguin'];
+    delete req.body['GroupeSanguin'];
+  }
+
+  // ✅ 2. NETTOYER LES CHAMPS ANGLAIS
   if (req.body.firstName && typeof req.body.firstName === 'string') {
     req.body.firstName = req.body.firstName.trim();
   }
@@ -54,11 +152,19 @@ const sanitizeInput = (req, res, next) => {
   if (req.body.biography && typeof req.body.biography === 'string') {
     req.body.biography = req.body.biography.trim();
   }
-  if (req.body.languages && Array.isArray(req.body.languages)) {
-    // Déjà un tableau, pas de modification
+  if (req.body.languages && !Array.isArray(req.body.languages)) {
+    if (typeof req.body.languages === 'string') {
+      try {
+        req.body.languages = JSON.parse(req.body.languages);
+      } catch (e) {
+        req.body.languages = [req.body.languages];
+      }
+    } else {
+      req.body.languages = [];
+    }
   }
 
-  console.log('Body après sanitize:', req.body);
+  console.log('Body après sanitize:', JSON.stringify(req.body, null, 2));
   next();
 };
 
