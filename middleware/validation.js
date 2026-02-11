@@ -32,7 +32,7 @@ const sanitizeInput = (req, res, next) => {
   console.log('\n🧹 === MIDDLEWARE SANITIZE ===');
   console.log('Body avant sanitize:', req.body);
   
-  // ✅ UNIQUEMENT nettoyer, JAMAIS ajouter des valeurs par défaut !
+  // ✅ UNIQUEMENT nettoyer, JAMAIS transformer
   if (req.body.firstName && typeof req.body.firstName === 'string') {
     req.body.firstName = req.body.firstName.trim();
   }
@@ -54,8 +54,6 @@ const sanitizeInput = (req, res, next) => {
   if (req.body.biography && typeof req.body.biography === 'string') {
     req.body.biography = req.body.biography.trim();
   }
-
-  // ✅ BLOC SUPPRIMÉ - PLUS AUCUNE VALEUR PAR DÉFAUT AUTOMATIQUE !
 
   console.log('Body après sanitize:', req.body);
   next();
@@ -128,46 +126,7 @@ const registerValidation = [
     .optional()
     .withMessage('Les langues doivent être un tableau')
     .custom((value) => true),
-  body('prénom').custom((value, { req }) => {
-    if (value && !req.body.firstName) req.body.firstName = value;
-    return true;
-  }),
-  body('NomDenom').custom((value, { req }) => {
-    if (value && !req.body.lastName) req.body.lastName = value;
-    return true;
-  }),
-  body('spécialité').custom((value, { req }) => {
-    if (value && !req.body.specialty) req.body.specialty = value;
-    return true;
-  }),
-  body('NuméroLicence').custom((value, { req }) => {
-    if (value && !req.body.licenseNumber) req.body.licenseNumber = value;
-    return true;
-  }),
-  body('biographie').custom((value, { req }) => {
-    if (value && !req.body.biography) req.body.biography = value;
-    return true;
-  }),
-  body('langues').custom((value, { req }) => {
-    if (value && !req.body.languages) req.body.languages = value;
-    return true;
-  }),
-  body('dateDeNaissance').custom((value, { req }) => {
-    if (value && !req.body.dateOfBirth) req.body.dateOfBirth = value;
-    return true;
-  }),
-  body('rôle').custom((value, { req }) => {
-    if (value && !req.body.role) req.body.role = value;
-    return true;
-  }),
-  body('NuméroDeTéléphone').custom((value, { req }) => {
-    if (value && !req.body.phoneNumber) req.body.phoneNumber = value;
-    return true;
-  }),
-  body('groupeSanguin').custom((value, { req }) => {
-    if (value && !req.body.bloodType) req.body.bloodType = value;
-    return true;
-  })
+  // ✅ PLUS AUCUN MAPPING ! LE FRONTEND DOIT ENVOYER LES BONS NOMS
 ];
 
 const loginValidation = [
