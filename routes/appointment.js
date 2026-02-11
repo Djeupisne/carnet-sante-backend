@@ -1,30 +1,109 @@
 const express = require('express');
 const router = express.Router();
-const { auth } = require('../middleware/auth');
-const appointmentController = require('../controllers/appointmentController');
+const { protect } = require('../middleware/auth');
+const {
+  getAvailableSlots,
+  getBookedSlots,
+  createAppointment,
+  getAppointments,
+  cancelAppointment
+} = require('../controllers/appointment');
 
-// GET /api/appointments - Récupérer tous les rendez-vous de l'utilisateur
-router.get('/', auth, appointmentController.getAppointments);
+// Routes publiques (ou semi-publiques)
+// ✅ Récupérer les créneaux disponibles d'un médecin
+router.get('/available-slots/:doctorId', getAvailableSlots);
 
-// GET /api/appointments/:id - Récupérer un rendez-vous spécifique
-router.get('/:id', auth, appointmentController.getAppointmentById);
+// ✅ Récupérer les créneaux occupés d'un médecin
+router.get('/booked-slots/:doctorId', getBookedSlots);
 
-// POST /api/appointments - Créer un nouveau rendez-vous
-router.post('/', auth, appointmentController.createAppointment);
+// Routes protégées (authentification requise)
+router.use(protect);
 
-// PATCH /api/appointments/:id/status - Mettre à jour le statut d'un rendez-vous
-router.patch('/:id/status', auth, appointmentController.updateAppointmentStatus);
+// Créer un rendez-vous
+router.post('/', createAppointment);
 
-// PATCH /api/appointments/:id/cancel - Annuler un rendez-vous
-router.patch('/:id/cancel', auth, appointmentController.cancelAppointment);
+// Récupérer tous les rendez-vous de l'utilisateur
+router.get('/', getAppointments);
 
-// PATCH /api/appointments/:id/confirm - Confirmer un rendez-vous
-router.patch('/:id/confirm', auth, appointmentController.confirmAppointment);
+// Annuler un rendez-vous
+router.patch('/:id/cancel', cancelAppointment);
 
-// PATCH /api/appointments/:id/complete - Marquer un rendez-vous comme terminé
-router.patch('/:id/complete', auth, appointmentController.completeAppointment);
+// Confirmer un rendez-vous (pour les médecins)
+router.patch('/:id/confirm', async (req, res) => {
+  try {
+    const { Appointment } = require('../models');
+    const { id } = req.params;
+    
+    const appointment = await Appointment.findByPk(id);
+    
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Rendez-vous introuvable'
+      });
+    }
+    
+    // Vérifier que l'utilisateur est le médecin
+    if (appointment.doctorId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Non autorisé'
+      });
+    }
+    
+    await appointment.update({ status: 'confirmed' });
+    
+    res.json({
+      success: true,
+      message: 'Rendez-vous confirmé'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Erreur serveur'
+    });
+  }
+});
 
-// PATCH /api/appointments/:id/rate - Noter un rendez-vous
-router.patch('/:id/rate', auth, appointmentController.rateAppointment);
+// Marquer comme terminé
+router.patch('/:id/complete', async (req, res) => {
+  try {
+    const { Appointment } = require('../models');
+    const { id } = req.params;
+    const { notes } = req.body;
+    
+    const appointment = await Appointment.findByPk(id);
+    
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Rendez-vous introuvable'
+      });
+    }
+    
+    // Vérifier que l'utilisateur est le médecin
+    if (appointment.doctorId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Non autorisé'
+      });
+    }
+    
+    await appointment.update({ 
+      status: 'completed',
+      notes: notes || appointment.notes
+    });
+    
+    res.json({
+      success: true,
+      message: 'Rendez-vous marqué comme terminé'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Erreur serveur'
+    });
+  }
+});
 
 module.exports = router;
