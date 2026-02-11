@@ -32,7 +32,7 @@ const sanitizeInput = (req, res, next) => {
   console.log('\n🧹 === MIDDLEWARE SANITIZE ===');
   console.log('Body avant sanitize:', req.body);
   
-  // ✅ UNIQUEMENT nettoyer, JAMAIS transformer
+  // ✅ UNIQUEMENT nettoyer les chaînes existantes
   if (req.body.firstName && typeof req.body.firstName === 'string') {
     req.body.firstName = req.body.firstName.trim();
   }
@@ -53,6 +53,9 @@ const sanitizeInput = (req, res, next) => {
   }
   if (req.body.biography && typeof req.body.biography === 'string') {
     req.body.biography = req.body.biography.trim();
+  }
+  if (req.body.languages && Array.isArray(req.body.languages)) {
+    // Déjà un tableau, pas de modification
   }
 
   console.log('Body après sanitize:', req.body);
@@ -87,7 +90,7 @@ const registerValidation = [
   body('gender')
     .notEmpty()
     .withMessage('Genre requis')
-    .isIn(['male', 'female', 'other', 'homme', 'femme', 'autre', 'masculin', 'féminin'])
+    .isIn(['male', 'female', 'other'])
     .withMessage('Genre invalide'),
   body('phoneNumber')
     .optional({ checkFalsy: true })
@@ -100,33 +103,27 @@ const registerValidation = [
     .withMessage('Groupe sanguin invalide'),
   body('role')
     .optional()
-    .isIn(['patient', 'doctor', 'admin', 'hospital_admin', 'docteur', 'médecin'])
+    .isIn(['patient', 'doctor', 'admin', 'hospital_admin'])
     .withMessage('Rôle invalide'),
   body('specialty')
     .optional({ nullable: true, checkFalsy: true })
     .trim()
     .isLength({ min: 0 })
-    .optional()
     .withMessage('Spécialité invalide'),
   body('licenseNumber')
     .optional({ nullable: true, checkFalsy: true })
     .trim()
     .isLength({ min: 0 })
-    .optional()
     .withMessage('Numéro de licence invalide'),
   body('biography')
     .optional({ nullable: true, checkFalsy: true })
     .trim()
     .isLength({ min: 0 })
-    .optional()
     .withMessage('Biographie invalide'),
   body('languages')
     .optional({ nullable: true, checkFalsy: true })
     .isArray()
-    .optional()
     .withMessage('Les langues doivent être un tableau')
-    .custom((value) => true),
-  // ✅ PLUS AUCUN MAPPING ! LE FRONTEND DOIT ENVOYER LES BONS NOMS
 ];
 
 const loginValidation = [
