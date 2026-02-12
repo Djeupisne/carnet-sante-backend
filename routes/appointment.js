@@ -6,104 +6,92 @@ const {
   getBookedSlots,
   createAppointment,
   getAppointments,
-  cancelAppointment
-} = require('../controllers/appointmentController'); // ✅ CORRIGÉ !
+  getAppointmentById,
+  getAllAppointments,
+  cancelAppointment,
+  confirmAppointment,
+  completeAppointment,
+  getDashboardStats,
+  getDoctors
+} = require('../controllers/appointmentController');
 
-// Routes publiques (ou semi-publiques)
-// ✅ Récupérer les créneaux disponibles d'un médecin
+// ============================================
+// ROUTES PUBLIQUES (sans authentification)
+// ============================================
+
+/**
+ * ✅ Récupérer les créneaux disponibles d'un médecin
+ * GET /api/appointments/available-slots/:doctorId?date=YYYY-MM-DD
+ */
 router.get('/available-slots/:doctorId', getAvailableSlots);
 
-// ✅ Récupérer les créneaux occupés d'un médecin
+/**
+ * ✅ Récupérer les créneaux occupés d'un médecin
+ * GET /api/appointments/booked-slots/:doctorId?date=YYYY-MM-DD
+ */
 router.get('/booked-slots/:doctorId', getBookedSlots);
 
-// Routes protégées (authentification requise)
+/**
+ * ✅ Récupérer la liste des médecins
+ * GET /api/doctors
+ */
+router.get('/doctors', getDoctors);
+
+// ============================================
+// ROUTES PROTÉGÉES (authentification requise)
+// ============================================
 router.use(protect);
 
-// Créer un rendez-vous
-router.post('/', createAppointment);
+// ========== RENDEZ-VOUS ==========
 
-// Récupérer tous les rendez-vous de l'utilisateur
-router.get('/', getAppointments);
+/**
+ * ✅ Créer un nouveau rendez-vous
+ * POST /api/appointments
+ */
+router.post('/appointments', createAppointment);
 
-// Annuler un rendez-vous
-router.patch('/:id/cancel', cancelAppointment);
+/**
+ * ✅ Récupérer tous les rendez-vous de l'utilisateur connecté
+ * GET /api/appointments
+ */
+router.get('/appointments', getAppointments);
 
-// Confirmer un rendez-vous (pour les médecins)
-router.patch('/:id/confirm', async (req, res) => {
-  try {
-    const { Appointment } = require('../models');
-    const { id } = req.params;
-    
-    const appointment = await Appointment.findByPk(id);
-    
-    if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Rendez-vous introuvable'
-      });
-    }
-    
-    // Vérifier que l'utilisateur est le médecin
-    if (appointment.doctorId !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Non autorisé'
-      });
-    }
-    
-    await appointment.update({ status: 'confirmed' });
-    
-    res.json({
-      success: true,
-      message: 'Rendez-vous confirmé'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Erreur serveur'
-    });
-  }
-});
+/**
+ * ✅ Récupérer TOUS les rendez-vous (admin/doctor)
+ * GET /api/appointments/all
+ */
+router.get('/appointments/all', getAllAppointments);
 
-// Marquer comme terminé
-router.patch('/:id/complete', async (req, res) => {
-  try {
-    const { Appointment } = require('../models');
-    const { id } = req.params;
-    const { notes } = req.body;
-    
-    const appointment = await Appointment.findByPk(id);
-    
-    if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Rendez-vous introuvable'
-      });
-    }
-    
-    // Vérifier que l'utilisateur est le médecin
-    if (appointment.doctorId !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Non autorisé'
-      });
-    }
-    
-    await appointment.update({ 
-      status: 'completed',
-      notes: notes || appointment.notes
-    });
-    
-    res.json({
-      success: true,
-      message: 'Rendez-vous marqué comme terminé'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Erreur serveur'
-    });
-  }
-});
+/**
+ * ✅ Récupérer un rendez-vous par ID
+ * GET /api/appointments/:id
+ */
+router.get('/appointments/:id', getAppointmentById);
+
+/**
+ * ✅ Annuler un rendez-vous
+ * PATCH /api/appointments/:id/cancel
+ */
+router.patch('/appointments/:id/cancel', cancelAppointment);
+
+/**
+ * ✅ Confirmer un rendez-vous (médecin)
+ * PATCH /api/appointments/:id/confirm
+ */
+router.patch('/appointments/:id/confirm', confirmAppointment);
+
+/**
+ * ✅ Marquer un rendez-vous comme terminé (médecin)
+ * PATCH /api/appointments/:id/complete
+ */
+router.patch('/appointments/:id/complete', completeAppointment);
+
+// ========== STATISTIQUES ==========
+
+/**
+ * ✅ Récupérer les statistiques du dashboard
+ * GET /api/dashboard/stats
+ */
+router.get('/dashboard/stats', getDashboardStats);
 
 module.exports = router;
