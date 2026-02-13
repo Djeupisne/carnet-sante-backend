@@ -1,7 +1,7 @@
 // CORRECTION : Import depuis models/index.js et Op inclus
 const { Appointment, User, Payment, AuditLog, Op } = require('../models');
 const { validationService } = require('../services/validationService');
-const { notificationService } = require('../services/notificationService');
+const { notificationService } = require('../services/notificationService.js');
 
 // Récupérer les créneaux disponibles d'un médecin
 const getAvailableSlots = async (req, res) => {
