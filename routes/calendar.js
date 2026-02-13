@@ -13,7 +13,7 @@ const Calendar = sequelize.define('Calendar', {
     primaryKey: true,
   },
   date: {
-    type: DataTypes.DATEONLY, // Changé de STRING à DATEONLY
+    type: DataTypes.DATEONLY,
     allowNull: false,
   },
   slots: {
@@ -43,7 +43,37 @@ const Calendar = sequelize.define('Calendar', {
   ]
 });
 
-// ✅ NOUVELLE ROUTE : Récupérer les créneaux disponibles d'un médecin
+// ✅ IMPORTANT: Définir les middlewares AVANT de les utiliser !
+// Middleware pour vérifier que l'utilisateur est un médecin
+const isDoctor = (req, res, next) => {
+  if (req.user.role !== 'doctor') {
+    return res.status(403).json({
+      success: false,
+      message: 'Accès non autorisé pour votre rôle'
+    });
+  }
+  next();
+};
+
+// Middleware pour vérifier que l'utilisateur est un administrateur
+const isAdmin = (req, res, next) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      message: 'Accès non autorisé pour votre rôle'
+    });
+  }
+  next();
+};
+
+// ============================================
+// ✅ ROUTES PUBLIQUES (sans authentification)
+// ============================================
+
+/**
+ * ✅ Récupérer les créneaux disponibles d'un médecin
+ * GET /api/calendars/available-slots/:doctorId?date=YYYY-MM-DD
+ */
 router.get('/available-slots/:doctorId', async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -143,17 +173,80 @@ router.get('/available-slots/:doctorId', async (req, res) => {
   }
 });
 
-// ✅ ROUTE : Créer ou mettre à jour les disponibilités d'un médecin
-router.post('/:doctorId/availability', authenticateToken, async (req, res) => {
-  try {
-    const { doctorId } = req.params;
-    const { date, slots } = req.body;
+// ============================================
+// ✅ ROUTES PROTÉGÉES (authentification requise)
+// ============================================
+router.use(authenticateToken);
 
-    // Vérifier les permissions
-    if (req.user.role !== 'admin' && req.user.id !== doctorId) {
-      return res.status(403).json({
+/**
+ * ✅ Récupérer les calendriers du médecin connecté
+ * GET /api/calendars
+ */
+router.get('/', isDoctor, async (req, res, next) => {
+  try {
+    const calendars = await Calendar.findAll({ 
+      where: { doctorId: req.user.id },
+      order: [['date', 'ASC']]
+    });
+    res.json({ success: true, data: calendars });
+  } catch (error) {
+    logger.error('Erreur lors de la récupération des calendriers:', error);
+    next(error);
+  }
+});
+
+/**
+ * ✅ Récupérer tous les calendriers (administrateur)
+ * GET /api/calendars/all
+ */
+router.get('/all', isAdmin, async (req, res, next) => {
+  try {
+    const calendars = await Calendar.findAll({
+      include: [{ model: sequelize.models.User, attributes: ['firstName', 'lastName'] }],
+      order: [['date', 'DESC']]
+    });
+    res.json({ success: true, data: calendars });
+  } catch (error) {
+    logger.error('Erreur lors de la récupération de tous les calendriers:', error);
+    next(error);
+  }
+});
+
+/**
+ * ✅ Récupérer les calendriers pour un patient
+ * GET /api/calendars/patient/:patientId
+ */
+router.get('/patient/:patientId', async (req, res, next) => {
+  try {
+    const appointments = await sequelize.models.Appointment.findAll({
+      where: { patientId: req.params.patientId },
+      attributes: ['doctorId'],
+    });
+    const doctorIds = appointments.map((appt) => appt.doctorId);
+    const calendars = await Calendar.findAll({
+      where: { doctorId: doctorIds },
+      include: [{ model: sequelize.models.User, attributes: ['firstName', 'lastName'] }],
+    });
+    res.json({ success: true, data: calendars });
+  } catch (error) {
+    logger.error('Erreur lors de la récupération des calendriers du patient:', error);
+    next(error);
+  }
+});
+
+/**
+ * ✅ Créer ou mettre à jour les disponibilités d'un médecin
+ * POST /api/calendars/availability
+ */
+router.post('/availability', isDoctor, async (req, res) => {
+  try {
+    const { date, slots } = req.body;
+    const doctorId = req.user.id;
+
+    if (!date || !slots || !Array.isArray(slots)) {
+      return res.status(400).json({
         success: false,
-        message: 'Non autorisé'
+        message: 'Date et slots requis'
       });
     }
 
@@ -162,7 +255,7 @@ router.post('/:doctorId/availability', authenticateToken, async (req, res) => {
       defaults: {
         doctorId,
         date,
-        slots: slots || [],
+        slots,
         confirmed: false,
         versions: []
       }
@@ -187,14 +280,12 @@ router.post('/:doctorId/availability', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ROUTE : Seed automatique des disponibilités pour tous les médecins
-router.post('/seed-availabilities', authenticateToken, async (req, res) => {
+/**
+ * ✅ Seed automatique des disponibilités pour tous les médecins (admin uniquement)
+ * POST /api/calendars/seed-availabilities
+ */
+router.post('/seed-availabilities', isAdmin, async (req, res) => {
   try {
-    // Seul l'admin peut faire ça
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Admin requis' });
-    }
-
     const { User } = sequelize.models;
     const { Op } = require('sequelize');
 
@@ -212,7 +303,7 @@ router.post('/seed-availabilities', authenticateToken, async (req, res) => {
     for (let i = 0; i < 30; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() + i);
-      if (date.getDay() !== 0) { // Pas de dimanche
+      if (date.getDay() !== 0) {
         dates.push(date.toISOString().split('T')[0]);
       }
     }
@@ -243,7 +334,6 @@ router.post('/seed-availabilities', authenticateToken, async (req, res) => {
         if (wasCreated) {
           created++;
         } else {
-          // Mettre à jour les slots si le calendrier existe mais est vide
           if (!calendar.slots || calendar.slots.length === 0) {
             await calendar.update({ slots: defaultSlots });
             updated++;
@@ -266,84 +356,17 @@ router.post('/seed-availabilities', authenticateToken, async (req, res) => {
   }
 });
 
-// Routes existantes...
-router.get('/', authenticateToken, isDoctor, async (req, res, next) => {
-  try {
-    const calendars = await Calendar.findAll({ 
-      where: { doctorId: req.user.id },
-      order: [['date', 'ASC']]
-    });
-    res.json({ success: true, data: calendars });
-  } catch (error) {
-    logger.error('Erreur lors de la récupération des calendriers:', error);
-    next(error);
-  }
-});
-
-// Middleware pour vérifier que l'utilisateur est un médecin
-const isDoctor = (req, res, next) => {
-  if (req.user.role !== 'doctor') {
-    return res.status(403).json({
-      success: false,
-      message: 'Accès non autorisé pour votre rôle'
-    });
-  }
-  next();
-};
-
-// Middleware pour vérifier que l'utilisateur est un administrateur
-const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      message: 'Accès non autorisé pour votre rôle'
-    });
-  }
-  next();
-};
-
-// Récupérer tous les calendriers (administrateur)
-router.get('/all', authenticateToken, isAdmin, async (req, res, next) => {
-  try {
-    const calendars = await Calendar.findAll({
-      include: [{ model: sequelize.models.User, attributes: ['firstName', 'lastName'] }],
-      order: [['date', 'DESC']]
-    });
-    res.json({ success: true, data: calendars });
-  } catch (error) {
-    logger.error('Erreur lors de la récupération de tous les calendriers:', error);
-    next(error);
-  }
-});
-
-// Récupérer les calendriers pour un patient
-router.get('/patient/:patientId', authenticateToken, async (req, res, next) => {
-  try {
-    const appointments = await sequelize.models.Appointment.findAll({
-      where: { patientId: req.params.patientId },
-      attributes: ['doctorId'],
-    });
-    const doctorIds = appointments.map((appt) => appt.doctorId);
-    const calendars = await Calendar.findAll({
-      where: { doctorId: doctorIds },
-      include: [{ model: sequelize.models.User, attributes: ['firstName', 'lastName'] }],
-    });
-    res.json({ success: true, data: calendars });
-  } catch (error) {
-    logger.error('Erreur lors de la récupération des calendriers du patient:', error);
-    next(error);
-  }
-});
-
-// Créer un calendrier
-router.post('/', authenticateToken, isDoctor, async (req, res, next) => {
+/**
+ * ✅ Créer un calendrier (route originale)
+ * POST /api/calendars
+ */
+router.post('/', isDoctor, async (req, res, next) => {
   try {
     const { date, slots } = req.body;
     if (!date || !slots || !Array.isArray(slots)) {
       return res.status(400).json({ success: false, message: 'Données invalides' });
     }
     
-    // Vérifier si un calendrier existe déjà pour cette date
     const existing = await Calendar.findOne({
       where: {
         doctorId: req.user.id,
@@ -371,8 +394,11 @@ router.post('/', authenticateToken, isDoctor, async (req, res, next) => {
   }
 });
 
-// Mettre à jour un calendrier
-router.put('/:id', authenticateToken, isDoctor, async (req, res, next) => {
+/**
+ * ✅ Mettre à jour un calendrier
+ * PUT /api/calendars/:id
+ */
+router.put('/:id', isDoctor, async (req, res, next) => {
   try {
     const calendar = await Calendar.findByPk(req.params.id);
     if (!calendar) {
@@ -393,8 +419,11 @@ router.put('/:id', authenticateToken, isDoctor, async (req, res, next) => {
   }
 });
 
-// Supprimer un calendrier
-router.delete('/:id', authenticateToken, async (req, res, next) => {
+/**
+ * ✅ Supprimer un calendrier
+ * DELETE /api/calendars/:id
+ */
+router.delete('/:id', async (req, res, next) => {
   try {
     const calendar = await Calendar.findByPk(req.params.id);
     if (!calendar) {
