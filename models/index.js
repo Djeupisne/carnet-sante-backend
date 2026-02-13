@@ -1,112 +1,108 @@
 const { sequelize } = require('../config/database');
 const fs = require('fs');
 const path = require('path');
-const { Sequelize, DataTypes, Op } = require('sequelize'); // IMPORTANT: Importer Op ici
+const { Sequelize, DataTypes, Op } = require('sequelize');
 
 const basename = path.basename(__filename);
 const db = {};
 
-// ✅ LISTE DES MODÈLES À IGNORER (pour éviter les conflits)
-const ignoreFiles = ['Calendar.js']; // On va charger Calendar manuellement
+// ✅ IMPORTANT: Charger d'abord les modèles existants avec la bonne syntaxe
+const modelFiles = [
+  'User',
+  'Appointment',
+  'Payment',
+  'AuditLog',
+  'MedicalFile',
+  'Notification',
+  'Review',
+  'Calendar'
+];
 
-// Import automatique de tous les modèles
-fs.readdirSync(__dirname)
-  .filter(file => {
-    return (
-      file.indexOf('.') !== 0 &&
-      file !== basename &&
-      file.slice(-3) === '.js' &&
-      file.indexOf('.test.js') === -1 &&
-      !ignoreFiles.includes(file) // Ignorer Calendar pour l'instant
-    );
-  })
-  .forEach(file => {
-    try {
-      const modelDefiner = require(path.join(__dirname, file));
+// Charger chaque modèle manuellement avec le bon pattern
+modelFiles.forEach(modelName => {
+  try {
+    const modelPath = path.join(__dirname, `${modelName}.js`);
+    
+    if (fs.existsSync(modelPath)) {
+      const modelDefiner = require(modelPath);
       
-      // ✅ CORRECTION: Appeler la fonction avec sequelize
+      // ✅ Vérifier le type du modèle et l'initialiser correctement
       if (typeof modelDefiner === 'function') {
+        // Modèle défini comme fonction (module.exports = (sequelize) => {...})
         const model = modelDefiner(sequelize, DataTypes);
         if (model && model.name) {
           db[model.name] = model;
           console.log(`✅ Modèle chargé: ${model.name}`);
         }
-      } else if (modelDefiner && modelDefiner.name) {
-        // Pour les modèles déjà définis
+      } else if (modelDefiner.prototype && modelDefiner.prototype.constructor) {
+        // Modèle défini comme classe (extends Model)
+        modelDefiner.init(modelDefiner.attributes, {
+          sequelize,
+          modelName: modelName,
+          tableName: modelDefiner.options?.tableName || `${modelName}s`
+        });
+        db[modelDefiner.name] = modelDefiner;
+        console.log(`✅ Modèle chargé: ${modelDefiner.name} (classe)`);
+      } else if (modelDefiner.name) {
+        // Modèle déjà initialisé
         db[modelDefiner.name] = modelDefiner;
         console.log(`✅ Modèle chargé: ${modelDefiner.name}`);
-      } else {
-        console.warn(`⚠️ Modèle ${file} n'est pas une fonction ou n'a pas de propriété 'name'`);
-      }
-    } catch (error) {
-      console.error(`❌ Erreur lors du chargement du modèle ${file}:`, error.message);
-    }
-  });
-
-// ✅ CHARGER LE MODÈLE CALENDAR MANUELLEMENT (CRITIQUE)
-try {
-  const calendarPath = path.join(__dirname, 'Calendar.js');
-  if (fs.existsSync(calendarPath)) {
-    const calendarModelDefiner = require(calendarPath);
-    if (typeof calendarModelDefiner === 'function') {
-      const Calendar = calendarModelDefiner(sequelize, DataTypes);
-      if (Calendar && Calendar.name) {
-        db[Calendar.name] = Calendar;
-        console.log(`✅ Modèle chargé: ${Calendar.name}`);
       }
     }
-  } else {
-    console.warn('⚠️ Fichier Calendar.js non trouvé, création du modèle par défaut...');
-    
-    // ✅ CRÉER LE MODÈLE CALENDAR DYNAMIQUEMENT S'IL N'EXISTE PAS
-    const Calendar = sequelize.define('Calendar', {
-      id: {
-        type: DataTypes.UUID,
-        defaultValue: DataTypes.UUIDV4,
-        primaryKey: true,
-      },
-      date: {
-        type: DataTypes.STRING, // Garder STRING pour éviter les erreurs de migration
-        allowNull: false,
-      },
-      slots: {
-        type: DataTypes.JSON,
-        allowNull: false,
-        defaultValue: []
-      },
-      confirmed: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-      },
-      doctorId: {
-        type: DataTypes.UUID,
-        allowNull: false,
-      },
-      versions: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-      }
-    }, {
-      tableName: 'Calendars',
-      indexes: [
-        {
-          unique: true,
-          fields: ['doctorId', 'date']
-        }
-      ]
-    });
-    
-    db.Calendar = Calendar;
-    console.log('✅ Modèle Calendar créé dynamiquement');
+  } catch (error) {
+    console.error(`❌ Erreur lors du chargement de ${modelName}:`, error.message);
   }
-} catch (error) {
-  console.error('❌ Erreur lors du chargement de Calendar:', error.message);
-}
+});
 
 console.log('🔍 Modèles chargés dans db:', Object.keys(db));
 
-// VÉRIFIER LES MODÈLES CRITIQUES
-const criticalModels = ['User', 'Appointment', 'Payment', 'AuditLog', 'Calendar'];
+// ✅ CRÉER LE MODÈLE CALENDAR DYNAMIQUEMENT S'IL N'EXISTE PAS
+if (!db.Calendar) {
+  console.log('📅 Création dynamique du modèle Calendar...');
+  
+  const Calendar = sequelize.define('Calendar', {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    date: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
+    slots: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: []
+    },
+    confirmed: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    doctorId: {
+      type: DataTypes.UUID,
+      allowNull: false,
+    },
+    versions: {
+      type: DataTypes.JSON,
+      defaultValue: [],
+    }
+  }, {
+    tableName: 'Calendars',
+    indexes: [
+      {
+        unique: true,
+        fields: ['doctorId', 'date']
+      }
+    ]
+  });
+  
+  db.Calendar = Calendar;
+  console.log('✅ Modèle Calendar créé dynamiquement');
+}
+
+// ✅ VÉRIFIER LES MODÈLES CRITIQUES
+const criticalModels = ['User', 'Appointment', 'Payment', 'AuditLog', 'Calendar', 'MedicalFile', 'Notification', 'Review'];
 criticalModels.forEach(modelName => {
   if (!db[modelName]) {
     console.error(`❌ MODÈLE CRITIQUE MANQUANT: ${modelName}`);
@@ -115,130 +111,110 @@ criticalModels.forEach(modelName => {
 
 // ✅ DÉFINIR LES ASSOCIATIONS
 const setupAssociations = () => {
-  // Associations User ↔ Appointment
+  // User ↔ Appointment
   if (db.User && db.Appointment) {
     try {
-      db.User.hasMany(db.Appointment, { 
-        as: 'patientAppointments',
-        foreignKey: 'patientId' 
-      });
-      
-      db.User.hasMany(db.Appointment, { 
-        as: 'doctorAppointments',
-        foreignKey: 'doctorId' 
-      });
-      
-      db.Appointment.belongsTo(db.User, { 
-        as: 'patient',
-        foreignKey: 'patientId' 
-      });
-      
-      db.Appointment.belongsTo(db.User, { 
-        as: 'doctor',
-        foreignKey: 'doctorId' 
-      });
-      
-      console.log('✅ Associations définies entre User et Appointment');
-    } catch (assocError) {
-      console.error('❌ Erreur associations User-Appointment:', assocError.message);
-    }
+      db.User.hasMany(db.Appointment, { as: 'patientAppointments', foreignKey: 'patientId' });
+      db.User.hasMany(db.Appointment, { as: 'doctorAppointments', foreignKey: 'doctorId' });
+      db.Appointment.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
+      db.Appointment.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+      console.log('✅ Associations User-Appointment OK');
+    } catch (e) { console.warn('⚠️ Erreur User-Appointment:', e.message); }
   }
 
-  // Associations Payment ↔ Appointment
+  // Payment ↔ Appointment
   if (db.Payment && db.Appointment) {
     try {
-      db.Payment.belongsTo(db.Appointment, {
-        foreignKey: 'appointmentId',
-        as: 'appointment'
-      });
-      
-      db.Appointment.hasOne(db.Payment, {
-        foreignKey: 'appointmentId',
-        as: 'payment'
-      });
-      
-      console.log('✅ Associations définies entre Appointment et Payment');
-    } catch (error) {
-      console.warn('⚠️ Erreur associations Payment:', error.message);
-    }
+      db.Payment.belongsTo(db.Appointment, { foreignKey: 'appointmentId', as: 'appointment' });
+      db.Appointment.hasOne(db.Payment, { foreignKey: 'appointmentId', as: 'payment' });
+      console.log('✅ Associations Payment-Appointment OK');
+    } catch (e) { console.warn('⚠️ Erreur Payment-Appointment:', e.message); }
   }
 
-  // ✅ NOUVELLES ASSOCIATIONS: User ↔ Calendar
+  // User ↔ Calendar
   if (db.User && db.Calendar) {
     try {
-      db.User.hasMany(db.Calendar, {
-        as: 'calendars',
-        foreignKey: 'doctorId'
-      });
-      
-      db.Calendar.belongsTo(db.User, {
-        as: 'doctor',
-        foreignKey: 'doctorId'
-      });
-      
-      console.log('✅ Associations définies entre User et Calendar');
-    } catch (error) {
-      console.warn('⚠️ Erreur associations Calendar:', error.message);
-    }
+      db.User.hasMany(db.Calendar, { as: 'calendars', foreignKey: 'doctorId' });
+      db.Calendar.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+      console.log('✅ Associations User-Calendar OK');
+    } catch (e) { console.warn('⚠️ Erreur User-Calendar:', e.message); }
   }
 
-  // ✅ ASSOCIATIONS: Appointment ↔ Calendar (optionnel)
-  // Pas d'association directe, on utilise la date et doctorId pour la logique métier
+  // User ↔ MedicalFile
+  if (db.User && db.MedicalFile) {
+    try {
+      db.User.hasOne(db.MedicalFile, { as: 'medicalFile', foreignKey: 'patientId' });
+      db.MedicalFile.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
+      console.log('✅ Associations User-MedicalFile OK');
+    } catch (e) { console.warn('⚠️ Erreur User-MedicalFile:', e.message); }
+  }
+
+  // User ↔ Notification
+  if (db.User && db.Notification) {
+    try {
+      db.User.hasMany(db.Notification, { as: 'notifications', foreignKey: 'userId' });
+      db.Notification.belongsTo(db.User, { as: 'user', foreignKey: 'userId' });
+      console.log('✅ Associations User-Notification OK');
+    } catch (e) { console.warn('⚠️ Erreur User-Notification:', e.message); }
+  }
+
+  // User ↔ Review
+  if (db.User && db.Review) {
+    try {
+      db.User.hasMany(db.Review, { as: 'reviews', foreignKey: 'doctorId' });
+      db.Review.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+      console.log('✅ Associations User-Review OK');
+    } catch (e) { console.warn('⚠️ Erreur User-Review:', e.message); }
+  }
+
+  // User ↔ AuditLog
+  if (db.User && db.AuditLog) {
+    try {
+      db.User.hasMany(db.AuditLog, { as: 'auditLogs', foreignKey: 'userId' });
+      db.AuditLog.belongsTo(db.User, { as: 'user', foreignKey: 'userId' });
+      console.log('✅ Associations User-AuditLog OK');
+    } catch (e) { console.warn('⚠️ Erreur User-AuditLog:', e.message); }
+  }
 };
 
 // Exécuter les associations
 setupAssociations();
 
-// ✅ VERSION CORRIGÉE: Synchronisation SANS alter:true pour éviter les erreurs de migration
+// ✅ SYNCHRONISATION SANS ALTER (CRITIQUE)
 const syncModels = async () => {
   try {
-    // ⚠️ NE PAS UTILISER alter:true - ça cause des erreurs de casting
     await sequelize.sync({ 
-      alter: false,  // ← CRITIQUE: false pour éviter les erreurs de migration
+      alter: false,  // ← CRITIQUE: NE PAS MODIFIER LA STRUCTURE EXISTANTE
       force: false,
       logging: false
     });
-    console.log('✅ Modèles synchronisés avec la base de données (sans migration forcée)');
+    console.log('✅ Modèles synchronisés avec la base de données');
     return true;
   } catch (error) {
-    console.error('❌ Erreur lors de la synchronisation des modèles:', error.message);
+    console.error('❌ Erreur synchronisation:', error.message);
     
-    // Tentative de synchronisation sans alter
+    // Tentative sans alter
     try {
       await sequelize.sync({ force: false, logging: false });
-      console.log('✅ Modèles synchronisés (mode secours)');
+      console.log('✅ Synchronisation mode secours réussie');
       return true;
-    } catch (fallbackError) {
-      console.error('❌ Échec de la synchronisation:', fallbackError.message);
+    } catch (e) {
+      console.error('❌ Échec synchronisation:', e.message);
       return false;
     }
   }
 };
 
-// ✅ VERSION ALTERNATIVE: Créer la table Calendar si elle n'existe pas
-const ensureCalendarTable = async () => {
-  if (db.Calendar) {
-    try {
-      await db.Calendar.sync({ force: false, alter: false });
-      console.log('✅ Table Calendar vérifiée');
-    } catch (error) {
-      console.error('❌ Erreur vérification table Calendar:', error.message);
-    }
-  }
-};
-
-// Exporter tous les modèles et fonctions - AVEC Op BIEN EXPORTÉ
+// Exporter
 module.exports = {
   ...db,
   sequelize,
   Sequelize,
   DataTypes,
-  Op, // ✅ EXPORTÉ CORRECTEMENT
-  syncModels,
-  ensureCalendarTable
+  Op,
+  syncModels
 };
 
-// Ajouter un log pour confirmer l'export
 console.log('✅ models/index.js chargé avec succès');
 console.log('🔍 Modèles exportés:', Object.keys(db));
 console.log('🔍 Op exporté?', typeof Op !== 'undefined' ? 'OUI' : 'NON');
