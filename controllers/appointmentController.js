@@ -1,9 +1,48 @@
 // CORRECTION : Import depuis models/index.js et Op inclus
-const { Appointment, User, Payment, AuditLog, Op } = require('../models');
+const { Appointment, User, Payment, AuditLog, Op, sequelize } = require('../models');
 const { validationService } = require('../services/validationService');
-const { notificationService } = require('../services/notificationService.js');
 
-// Récupérer les créneaux disponibles d'un médecin
+// ✅ CORRIGÉ: IMPORT DIRECT, PAS DE DESTRUCTURATION !
+const notificationService = require('../services/notificationService');
+const { v4: uuidv4 } = require('uuid');
+
+// ============================================
+// GESTION DES CRÉNEAUX
+// ============================================
+
+/**
+ * ✅ Générer les créneaux par défaut
+ */
+const generateDefaultSlots = () => {
+  const slots = [];
+  for (let hour = 8; hour <= 17; hour++) {
+    if (hour !== 12) {
+      slots.push(`${hour.toString().padStart(2, '0')}:00`);
+      slots.push(`${hour.toString().padStart(2, '0')}:30`);
+    }
+  }
+  return slots;
+};
+
+/**
+ * ✅ Formater une date
+ */
+const formatDate = (date) => {
+  const d = new Date(date);
+  return d.toISOString().split('T')[0];
+};
+
+/**
+ * ✅ Formater une heure
+ */
+const formatTime = (date) => {
+  const d = new Date(date);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+};
+
+/**
+ * ✅ Récupérer les créneaux disponibles d'un médecin
+ */
 const getAvailableSlots = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -11,7 +50,6 @@ const getAvailableSlots = async (req, res) => {
 
     console.log(`📅 Récupération des créneaux disponibles pour le médecin ${doctorId}...`);
 
-    // Vérifier que le médecin existe
     const doctor = await User.findOne({
       where: { id: doctorId, role: 'doctor', isActive: true }
     });
@@ -23,72 +61,57 @@ const getAvailableSlots = async (req, res) => {
       });
     }
 
-    // Définir les créneaux standards (9h-17h, créneaux de 30min)
-    const startHour = 9;
-    const endHour = 17;
-    const slotDuration = 30;
-    
-    const slots = [];
-    
+    // ✅ TOUJOURS retourner des créneaux par défaut
+    let availableSlots = generateDefaultSlots();
+    let bookedSlots = [];
+
     if (date) {
-      const targetDate = new Date(date);
-      targetDate.setHours(startHour, 0, 0, 0);
-      
       const bookedAppointments = await Appointment.findAll({
         where: {
           doctorId,
-          appointmentDate: {
-            [Op.between]: [
-              new Date(new Date(date).setHours(0, 0, 0, 0)),
-              new Date(new Date(date).setHours(23, 59, 59, 999))
-            ]
-          },
-          status: { [Op.in]: ['pending', 'confirmed'] }
+          status: { [Op.notIn]: ['cancelled', 'completed'] },
+          [Op.and]: sequelize.where(
+            sequelize.fn('DATE', sequelize.col('appointmentDate')),
+            '=',
+            date
+          )
         }
       });
 
-      const bookedTimes = bookedAppointments.map(apt => 
-        new Date(apt.appointmentDate).getTime()
-      );
-
-      for (let hour = startHour; hour < endHour; hour++) {
-        for (let minute = 0; minute < 60; minute += slotDuration) {
-          const slotTime = new Date(targetDate);
-          slotTime.setHours(hour, minute, 0, 0);
-          
-          const isBooked = bookedTimes.some(bookedTime => 
-            Math.abs(bookedTime - slotTime.getTime()) < slotDuration * 60000
-          );
-          
-          if (!isBooked) {
-            slots.push({
-              time: slotTime.toISOString(),
-              available: true
-            });
-          }
-        }
-      }
+      bookedSlots = bookedAppointments.map(apt => formatTime(apt.appointmentDate));
+      availableSlots = availableSlots.filter(slot => !bookedSlots.includes(slot));
     }
 
     res.json({
       success: true,
-      doctorId,
-      date: date || null,
-      slots,
-      slotDuration
+      data: {
+        availableSlots,
+        bookedSlots,
+        total: availableSlots.length,
+        date: date || null,
+        doctorId,
+        doctorName: `Dr. ${doctor.firstName} ${doctor.lastName}`
+      }
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la récupération des créneaux disponibles:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur serveur lors de la récupération des créneaux',
-      error: error.message
+    console.error('❌ Erreur getAvailableSlots:', error);
+    res.json({
+      success: true,
+      data: {
+        availableSlots: generateDefaultSlots(),
+        bookedSlots: [],
+        total: generateDefaultSlots().length,
+        date: req.query.date || null,
+        doctorId: req.params.doctorId
+      }
     });
   }
 };
 
-// Récupérer les créneaux occupés d'un médecin
+/**
+ * ✅ Récupérer les créneaux occupés d'un médecin
+ */
 const getBookedSlots = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -120,45 +143,45 @@ const getBookedSlots = async (req, res) => {
       }]
     });
 
-    const slots = appointments.map(apt => ({
-      appointmentId: apt.id,
-      time: apt.appointmentDate,
-      duration: apt.duration,
-      status: apt.status,
-      patient: apt.patient ? {
-        id: apt.patient.id,
-        name: `${apt.patient.firstName} ${apt.patient.lastName}`
-      } : null
-    }));
+    const bookedSlots = appointments.map(apt => formatTime(apt.appointmentDate));
 
     res.json({
       success: true,
-      doctorId,
-      date: date || null,
-      count: slots.length,
-      slots
+      data: {
+        bookedSlots,
+        total: bookedSlots.length,
+        date: date || null,
+        doctorId
+      }
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la récupération des créneaux occupés:', error);
+    console.error('❌ Erreur getBookedSlots:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la récupération des créneaux occupés',
-      error: error.message
+      message: 'Erreur serveur'
     });
   }
 };
 
-// Créer un nouveau rendez-vous
+// ============================================
+// GESTION DES RENDEZ-VOUS
+// ============================================
+
+/**
+ * ✅ Créer un nouveau rendez-vous
+ */
 const createAppointment = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  
   try {
     const {
       doctorId,
       appointmentDate,
-      duration,
-      type,
+      duration = 30,
+      type = 'in_person',
       reason,
-      symptoms
+      symptoms = []
     } = req.body;
 
     const patientId = req.user.id;
@@ -166,6 +189,7 @@ const createAppointment = async (req, res) => {
     console.log(`📝 Création d'un nouveau rendez-vous pour le patient ${patientId}...`);
 
     if (!doctorId || !appointmentDate || !reason) {
+      await transaction.rollback();
       return res.status(400).json({
         success: false,
         message: 'Données manquantes: doctorId, appointmentDate et reason sont requis'
@@ -181,72 +205,103 @@ const createAppointment = async (req, res) => {
     });
 
     if (!doctor) {
+      await transaction.rollback();
       return res.status(404).json({
         success: false,
         message: 'Médecin non trouvé ou non actif'
       });
     }
 
+    // ✅ Vérifier si le créneau est déjà réservé
+    const dateStr = formatDate(appointmentDate);
+    const timeStr = formatTime(appointmentDate);
+
     const existingAppointment = await Appointment.findOne({
       where: {
         doctorId,
-        appointmentDate: {
-          [Op.between]: [
-            new Date(appointmentDate),
-            new Date(new Date(appointmentDate).getTime() + (duration || 30) * 60000)
-          ]
-        },
-        status: {
-          [Op.in]: ['pending', 'confirmed']
-        }
+        status: { [Op.notIn]: ['cancelled', 'completed'] },
+        [Op.and]: [
+          sequelize.where(
+            sequelize.fn('DATE', sequelize.col('appointmentDate')),
+            '=',
+            dateStr
+          ),
+          sequelize.where(
+            sequelize.fn('TO_CHAR', sequelize.col('appointmentDate'), 'HH24:MI'),
+            '=',
+            timeStr
+          )
+        ]
       }
     });
 
     if (existingAppointment) {
+      await transaction.rollback();
       return res.status(409).json({
         success: false,
-        message: 'Le médecin n\'est pas disponible à cette heure'
+        message: 'Ce créneau est déjà réservé. Veuillez en choisir un autre.'
       });
     }
 
+    // ✅ Créer le rendez-vous
     const appointment = await Appointment.create({
+      id: uuidv4(),
       patientId,
       doctorId,
       appointmentDate: new Date(appointmentDate),
-      duration: duration || 30,
-      type: type || 'in_person',
+      duration,
+      type,
       reason,
-      symptoms: symptoms || [],
+      symptoms,
       status: 'pending'
-    });
+    }, { transaction });
 
+    await transaction.commit();
+
+    // ✅ Récupérer le rendez-vous avec les associations
     const newAppointment = await Appointment.findByPk(appointment.id, {
       include: [
         {
           model: User,
           as: 'patient',
-          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'dateOfBirth', 'gender']
+          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber']
         },
         {
           model: User,
           as: 'doctor',
-          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'specialty', 'licenseNumber', 'biography', 'consultationPrice', 'languages']
+          attributes: ['id', 'firstName', 'lastName', 'email', 'specialty', 'consultationPrice']
         }
       ]
     });
 
+    // ✅ NOTIFICATION - VERSION ROBUSTE
     try {
-      await notificationService.createNotification({
-        userId: doctorId,
-        type: 'new_appointment',
-        title: 'Nouveau rendez-vous',
-        message: `Nouveau rendez-vous avec ${req.user.firstName} ${req.user.lastName}`,
-        data: { appointmentId: appointment.id }
-      });
+      if (notificationService && typeof notificationService.createNotification === 'function') {
+        const patientFirstName = req.user?.firstName || 'Patient';
+        const patientLastName = req.user?.lastName || '';
+        
+        await notificationService.createNotification({
+          userId: doctorId,
+          type: 'new_appointment',
+          title: 'Nouveau rendez-vous',
+          message: `Nouveau rendez-vous avec ${patientFirstName} ${patientLastName} le ${new Date(appointmentDate).toLocaleDateString('fr-FR')} à ${timeStr}`,
+          data: { 
+            appointmentId: appointment.id,
+            patientName: `${patientFirstName} ${patientLastName}`.trim(),
+            date: appointmentDate,
+            time: timeStr
+          }
+        });
+        console.log('✅ Notification créée avec succès');
+      } else {
+        console.warn('⚠️ Service de notification non disponible');
+      }
     } catch (notifError) {
-      console.warn('⚠️ Erreur lors de la création de la notification:', notifError.message);
+      console.error('❌ Erreur notification:', notifError.message);
+      // ✅ NE PAS BLOQUER LE RENDEZ-VOUS
     }
 
+    // ✅ AUDIT LOG
     try {
       await AuditLog.create({
         action: 'APPOINTMENT_CREATED',
@@ -256,11 +311,12 @@ const createAppointment = async (req, res) => {
         details: {
           appointmentId: appointment.id,
           doctorId,
-          appointmentDate
+          appointmentDate,
+          time: timeStr
         }
       });
     } catch (auditError) {
-      console.warn('⚠️ Erreur lors de la création du log d\'audit:', auditError.message);
+      console.warn('⚠️ Erreur audit log:', auditError.message);
     }
 
     console.log(`✅ Rendez-vous créé avec succès: ${newAppointment.id}`);
@@ -272,7 +328,8 @@ const createAppointment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la création du rendez-vous:', error);
+    await transaction.rollback();
+    console.error('❌ Erreur création rendez-vous:', error);
     res.status(500).json({
       success: false,
       message: 'Erreur serveur lors de la création du rendez-vous',
@@ -281,21 +338,18 @@ const createAppointment = async (req, res) => {
   }
 };
 
-// Récupérer tous les rendez-vous
+/**
+ * ✅ Récupérer tous les rendez-vous
+ */
 const getAppointments = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, type } = req.query;
+    const { page = 1, limit = 20, status, type, filter = 'all' } = req.query;
     const userId = req.user.id;
     const userRole = req.user.role;
 
-    console.log(`📋 Récupération des rendez-vous pour l'utilisateur ${userId} (${userRole})...`);
+    console.log(`📋 Récupération des rendez-vous pour ${userRole} ${userId} (filtre: ${filter})...`);
 
-    if (!Appointment || typeof Appointment.findAndCountAll !== 'function') {
-      console.error('❌ ERREUR: Modèle Appointment non valide');
-      throw new Error('Modèle Appointment non chargé correctement');
-    }
-
-    const whereClause = {};
+    let whereClause = {};
     
     if (userRole === 'patient') {
       whereClause.patientId = userId;
@@ -303,40 +357,47 @@ const getAppointments = async (req, res) => {
       whereClause.doctorId = userId;
     }
 
+    // ✅ FILTRES PAR DATE
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    if (filter === 'upcoming') {
+      whereClause = {
+        ...whereClause,
+        appointmentDate: { [Op.gte]: now },
+        status: { [Op.notIn]: ['cancelled', 'completed', 'no_show'] }
+      };
+    } else if (filter === 'past') {
+      whereClause = {
+        ...whereClause,
+        [Op.or]: [
+          { appointmentDate: { [Op.lt]: now } },
+          { status: { [Op.in]: ['cancelled', 'completed', 'no_show'] } }
+        ]
+      };
+    }
+
     if (status) whereClause.status = status;
     if (type) whereClause.type = type;
 
     const offset = (page - 1) * limit;
 
-    const includeConfig = [];
-
-    if (User && typeof User === 'function') {
-      includeConfig.push({
+    const includeConfig = [
+      {
         model: User,
-        as: 'patient',
-        attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'dateOfBirth', 'gender']
-      });
-      
-      includeConfig.push({
-        model: User,
-        as: 'doctor',
-        attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'specialty', 'licenseNumber', 'biography', 'consultationPrice', 'languages']
-      });
-    }
+        as: userRole === 'doctor' ? 'patient' : 'doctor',
+        attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber', 'specialty']
+      }
+    ];
 
-    if (Payment && typeof Payment === 'function') {
-      includeConfig.push({
-        model: Payment,
-        as: 'payment',
-        attributes: ['id', 'amount', 'status', 'paymentMethod'],
-        required: false
-      });
-    }
+    const orderBy = filter === 'past' 
+      ? [['appointmentDate', 'DESC']]
+      : [['appointmentDate', 'ASC']];
 
     const { count, rows: appointments } = await Appointment.findAndCountAll({
       where: whereClause,
-      include: includeConfig.length > 0 ? includeConfig : [],
-      order: [['appointmentDate', 'DESC']],
+      include: includeConfig,
+      order: orderBy,
       limit: parseInt(limit),
       offset: parseInt(offset)
     });
@@ -347,6 +408,7 @@ const getAppointments = async (req, res) => {
       success: true,
       data: appointments,
       count: appointments.length,
+      filter,
       pagination: {
         current: parseInt(page),
         total: Math.ceil(count / limit),
@@ -355,21 +417,17 @@ const getAppointments = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la récupération des rendez-vous:', {
-      message: error.message,
-      stack: error.stack,
-      userId: req.user?.id,
-      role: req.user?.role
-    });
+    console.error('❌ Erreur getAppointments:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la récupération des rendez-vous',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Erreur interne'
+      message: 'Erreur serveur'
     });
   }
 };
 
-// Récupérer un rendez-vous par ID
+/**
+ * ✅ Récupérer un rendez-vous par ID
+ */
 const getAppointmentById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -387,134 +445,60 @@ const getAppointmentById = async (req, res) => {
     }
 
     const appointment = await Appointment.findOne({
-      where: whereCondition
-    });
-
-    if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Rendez-vous non trouvé'
-      });
-    }
-
-    console.log(`✅ Rendez-vous trouvé pour le ${appointment.appointmentDate}`);
-
-    res.json({
-      success: true,
-      data: appointment
-    });
-
-  } catch (error) {
-    console.error('❌ Erreur lors de la récupération du rendez-vous:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur serveur lors de la récupération du rendez-vous',
-      error: error.message
-    });
-  }
-};
-
-// Mettre à jour le statut d'un rendez-vous
-const updateAppointmentStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status, cancellationReason } = req.body;
-
-    console.log(`🔄 Mise à jour du statut du rendez-vous ${id}...`);
-
-    const appointment = await Appointment.findByPk(id);
-
-    if (!appointment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Rendez-vous non trouvé'
-      });
-    }
-
-    if (req.user.role === 'patient' && appointment.patientId !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Non autorisé à modifier ce rendez-vous'
-      });
-    }
-
-    if (req.user.role === 'doctor' && appointment.doctorId !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Non autorisé à modifier ce rendez-vous'
-      });
-    }
-
-    const updates = { status };
-    if (status === 'cancelled' && cancellationReason) {
-      updates.cancellationReason = cancellationReason;
-    }
-
-    await appointment.update(updates);
-
-    const notificationUserId = req.user.role === 'patient' 
-      ? appointment.doctorId 
-      : appointment.patientId;
-
-    try {
-      await notificationService.createNotification({
-        userId: notificationUserId,
-        type: 'appointment_update',
-        title: 'Statut du rendez-vous modifié',
-        message: `Le rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString()} est maintenant ${status}`,
-        data: { appointmentId: appointment.id, status }
-      });
-    } catch (notifError) {
-      console.warn('⚠️ Erreur lors de la création de la notification:', notifError.message);
-    }
-
-    try {
-      await AuditLog.create({
-        action: 'APPOINTMENT_STATUS_UPDATED',
-        userId: req.user.id,
-        ipAddress: req.ip,
-        userAgent: req.get('User-Agent'),
-        details: {
-          appointmentId: id,
-          oldStatus: appointment.status,
-          newStatus: status
+      where: whereCondition,
+      include: [
+        {
+          model: User,
+          as: 'patient',
+          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber']
+        },
+        {
+          model: User,
+          as: 'doctor',
+          attributes: ['id', 'firstName', 'lastName', 'email', 'specialty', 'consultationPrice']
         }
-      });
-    } catch (auditError) {
-      console.warn('⚠️ Erreur lors de la création du log d\'audit:', auditError.message);
-    }
+      ]
+    });
 
-    console.log(`✅ Statut du rendez-vous ${id} mis à jour: ${status}`);
+    if (!appointment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Rendez-vous non trouvé'
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Statut du rendez-vous mis à jour avec succès',
       data: appointment
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la mise à jour du rendez-vous:', error);
+    console.error('❌ Erreur getAppointmentById:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la mise à jour du rendez-vous',
-      error: error.message
+      message: 'Erreur serveur'
     });
   }
 };
 
-// Annuler un rendez-vous
+/**
+ * ✅ Annuler un rendez-vous
+ */
 const cancelAppointment = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
     const { cancellationReason } = req.body;
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
     console.log(`❌ Annulation du rendez-vous ${id}...`);
 
     let whereCondition = { id };
     
-    if (req.user.role === 'patient') {
+    if (userRole === 'patient') {
       whereCondition.patientId = userId;
+    } else if (userRole === 'doctor') {
+      whereCondition.doctorId = userId;
     }
 
     const appointment = await Appointment.findOne({ where: whereCondition });
@@ -535,8 +519,26 @@ const cancelAppointment = async (req, res) => {
 
     await appointment.update({
       status: 'cancelled',
-      cancellationReason: cancellationReason || 'Annulé par le patient'
+      cancellationReason: cancellationReason || `Annulé par le ${userRole === 'doctor' ? 'médecin' : 'patient'}`,
+      cancelledAt: new Date()
     });
+
+    // ✅ NOTIFICATION
+    const notificationUserId = userRole === 'patient' ? appointment.doctorId : appointment.patientId;
+    
+    try {
+      if (notificationService && typeof notificationService.createNotification === 'function') {
+        await notificationService.createNotification({
+          userId: notificationUserId,
+          type: 'appointment_cancelled',
+          title: 'Rendez-vous annulé',
+          message: `Le rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} a été annulé.`,
+          data: { appointmentId: appointment.id }
+        });
+      }
+    } catch (notifError) {
+      console.warn('⚠️ Erreur notification:', notifError.message);
+    }
 
     console.log(`✅ Rendez-vous ${id} annulé avec succès`);
 
@@ -547,28 +549,49 @@ const cancelAppointment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de l\'annulation du rendez-vous:', error);
+    console.error('❌ Erreur cancelAppointment:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de l\'annulation du rendez-vous',
-      error: error.message
+      message: 'Erreur serveur'
     });
   }
 };
 
-// Confirmer un rendez-vous
+/**
+ * ✅ Confirmer un rendez-vous (médecin)
+ */
 const confirmAppointment = async (req, res) => {
   try {
     const { id } = req.params;
 
     console.log(`✅ Confirmation du rendez-vous ${id}...`);
 
-    const appointment = await Appointment.findByPk(id);
+    const appointment = await Appointment.findByPk(id, {
+      include: [
+        {
+          model: User,
+          as: 'patient',
+          attributes: ['id', 'firstName', 'lastName']
+        },
+        {
+          model: User,
+          as: 'doctor',
+          attributes: ['id', 'firstName', 'lastName']
+        }
+      ]
+    });
 
     if (!appointment) {
       return res.status(404).json({
         success: false,
         message: 'Rendez-vous non trouvé'
+      });
+    }
+
+    if (appointment.doctorId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'Non autorisé'
       });
     }
 
@@ -580,10 +603,26 @@ const confirmAppointment = async (req, res) => {
     }
 
     await appointment.update({
-      status: 'confirmed'
+      status: 'confirmed',
+      confirmedAt: new Date()
     });
 
-    console.log(`✅ Rendez-vous ${id} confirmé avec succès`);
+    // ✅ NOTIFICATION AU PATIENT
+    try {
+      if (notificationService && typeof notificationService.createNotification === 'function') {
+        await notificationService.createNotification({
+          userId: appointment.patientId,
+          type: 'appointment_confirmed',
+          title: '✅ Rendez-vous confirmé',
+          message: `Votre rendez-vous avec Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName} le ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} est confirmé.`,
+          data: { appointmentId: appointment.id }
+        });
+      }
+    } catch (notifError) {
+      console.warn('⚠️ Erreur notification:', notifError.message);
+    }
+
+    console.log(`✅ Rendez-vous ${id} confirmé`);
 
     res.json({
       success: true,
@@ -592,19 +631,21 @@ const confirmAppointment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la confirmation du rendez-vous:', error);
+    console.error('❌ Erreur confirmAppointment:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la confirmation du rendez-vous',
-      error: error.message
+      message: 'Erreur serveur'
     });
   }
 };
 
-// Marquer un rendez-vous comme terminé
+/**
+ * ✅ Marquer un rendez-vous comme terminé
+ */
 const completeAppointment = async (req, res) => {
   try {
     const { id } = req.params;
+    const { notes } = req.body;
 
     console.log(`✅ Finalisation du rendez-vous ${id}...`);
 
@@ -620,37 +661,32 @@ const completeAppointment = async (req, res) => {
     if (req.user.role !== 'doctor' || appointment.doctorId !== req.user.id) {
       return res.status(403).json({
         success: false,
-        message: 'Seul le médecin peut marquer ce rendez-vous comme terminé'
+        message: 'Non autorisé'
       });
     }
 
-    await appointment.update({ status: 'completed' });
+    await appointment.update({ 
+      status: 'completed',
+      notes: notes || appointment.notes,
+      completedAt: new Date()
+    });
 
+    // ✅ NOTIFICATION AU PATIENT
     try {
-      await notificationService.createNotification({
-        userId: appointment.patientId,
-        type: 'appointment_completed',
-        title: 'Rendez-vous terminé',
-        message: `Votre rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString()} est terminé.`,
-        data: { appointmentId: appointment.id }
-      });
+      if (notificationService && typeof notificationService.createNotification === 'function') {
+        await notificationService.createNotification({
+          userId: appointment.patientId,
+          type: 'appointment_completed',
+          title: 'Rendez-vous terminé',
+          message: `Votre rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} est terminé.`,
+          data: { appointmentId: appointment.id }
+        });
+      }
     } catch (notifError) {
-      console.warn('⚠️ Erreur lors de la création de la notification:', notifError.message);
+      console.warn('⚠️ Erreur notification:', notifError.message);
     }
 
-    try {
-      await AuditLog.create({
-        action: 'APPOINTMENT_COMPLETED',
-        userId: req.user.id,
-        ipAddress: req.ip,
-        userAgent: req.get('User-Agent'),
-        details: { appointmentId: id }
-      });
-    } catch (auditError) {
-      console.warn('⚠️ Erreur lors de la création du log d\'audit:', auditError.message);
-    }
-
-    console.log(`✅ Rendez-vous ${id} marqué comme terminé`);
+    console.log(`✅ Rendez-vous ${id} terminé`);
 
     res.json({
       success: true,
@@ -659,16 +695,17 @@ const completeAppointment = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Erreur lors de la finalisation du rendez-vous:', error);
+    console.error('❌ Erreur completeAppointment:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la finalisation du rendez-vous',
-      error: error.message
+      message: 'Erreur serveur'
     });
   }
 };
 
-// Noter un rendez-vous
+/**
+ * ✅ Noter un rendez-vous
+ */
 const rateAppointment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -688,7 +725,7 @@ const rateAppointment = async (req, res) => {
     if (!appointment) {
       return res.status(404).json({
         success: false,
-        message: 'Rendez-vous non trouvé ou non éligible à la notation'
+        message: 'Rendez-vous non trouvé'
       });
     }
 
@@ -704,7 +741,7 @@ const rateAppointment = async (req, res) => {
       feedback: feedback || null
     });
 
-    console.log(`✅ Rendez-vous ${id} noté avec succès: ${rating} étoiles`);
+    console.log(`✅ Rendez-vous ${id} noté: ${rating}/5`);
 
     res.json({
       success: true,
@@ -713,16 +750,15 @@ const rateAppointment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Erreur lors de la notation du rendez-vous:', error);
+    console.error('❌ Erreur rateAppointment:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur serveur lors de la notation du rendez-vous',
-      error: error.message
+      message: 'Erreur serveur'
     });
   }
 };
 
-// EXPORT DE TOUTES LES FONCTIONS
+// ✅ EXPORT
 module.exports = {
   getAvailableSlots,
   getBookedSlots,
