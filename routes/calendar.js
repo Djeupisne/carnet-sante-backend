@@ -383,4 +383,159 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
+// ============================================
+// 🆕 NOUVELLE ROUTE - CONFIRMER UN CALENDRIER
+// ============================================
+
+/**
+ * ✅ Confirmer un calendrier
+ * POST /api/calendars/:id/confirm
+ */
+router.post('/:id/confirm', isDoctor, async (req, res, next) => {
+  try {
+    const calendarId = req.params.id;
+    
+    console.log(`📅 Confirmation calendrier demandée: ${calendarId} par ${req.user.id}`);
+    
+    // Récupérer le calendrier
+    const calendar = await Calendar.findByPk(calendarId);
+    
+    if (!calendar) {
+      console.log(`❌ Calendrier ${calendarId} non trouvé`);
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Calendrier non trouvé' 
+      });
+    }
+    
+    // Vérifier que le calendrier appartient au médecin
+    if (calendar.doctorId !== req.user.id) {
+      console.log(`❌ Calendrier ${calendarId} n'appartient pas au médecin ${req.user.id}`);
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Non autorisé à confirmer ce calendrier' 
+      });
+    }
+    
+    // Marquer comme confirmé
+    await calendar.update({ 
+      confirmed: true,
+      confirmedAt: new Date() // Si vous avez ce champ dans votre modèle
+    });
+    
+    console.log(`✅ Calendrier ${calendarId} confirmé avec succès`);
+    
+    // Recharger le calendrier pour avoir les données à jour
+    await calendar.reload();
+    
+    res.json({ 
+      success: true,
+      data: calendar,
+      message: 'Calendrier confirmé avec succès'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur lors de la confirmation du calendrier:', error);
+    logger.error('Erreur lors de la confirmation du calendrier:', error);
+    next(error);
+  }
+});
+
+// ============================================
+// 🆕 ROUTES OPTIONNELLES (pour fonctionnalités avancées)
+// ============================================
+
+/**
+ * ✅ Sauvegarder une version du calendrier (historique)
+ * POST /api/calendars/:id/version
+ */
+router.post('/:id/version', isDoctor, async (req, res, next) => {
+  try {
+    const calendar = await Calendar.findByPk(req.params.id);
+    
+    if (!calendar) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Calendrier non trouvé' 
+      });
+    }
+    
+    if (calendar.doctorId !== req.user.id) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Non autorisé' 
+      });
+    }
+    
+    // Ajouter la version actuelle à l'historique
+    const versions = calendar.versions || [];
+    versions.push({
+      date: calendar.date,
+      slots: calendar.slots,
+      confirmed: calendar.confirmed,
+      savedAt: new Date()
+    });
+    
+    await calendar.update({ versions });
+    
+    console.log(`✅ Version sauvegardée pour calendrier ${req.params.id}`);
+    
+    res.json({ 
+      success: true,
+      message: 'Version sauvegardée',
+      data: calendar
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur sauvegarde version:', error);
+    logger.error('Erreur lors de la sauvegarde de la version:', error);
+    next(error);
+  }
+});
+
+/**
+ * ✅ Notifier les patients des modifications du calendrier
+ * POST /api/calendars/:id/notify
+ */
+router.post('/:id/notify', isDoctor, async (req, res, next) => {
+  try {
+    const calendar = await Calendar.findByPk(req.params.id);
+    
+    if (!calendar) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Calendrier non trouvé' 
+      });
+    }
+    
+    if (calendar.doctorId !== req.user.id) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Non autorisé' 
+      });
+    }
+    
+    // TODO: Implémenter la logique de notification
+    // - Récupérer les patients ayant des RDV avec ce médecin à cette date
+    // - Envoyer emails/SMS/push notifications
+    // - Logger les notifications envoyées
+    
+    console.log(`📧 Notification patients pour calendrier ${req.params.id}`);
+    
+    res.json({ 
+      success: true,
+      message: 'Patients notifiés (fonctionnalité à implémenter)'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur notification patients:', error);
+    logger.error('Erreur lors de la notification des patients:', error);
+    // Ne pas bloquer si la notification échoue
+    res.json({ 
+      success: true,
+      message: 'Calendrier mis à jour (notification échouée)'
+    });
+  }
+});
+
 module.exports = router;
