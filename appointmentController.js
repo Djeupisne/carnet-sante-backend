@@ -1,7 +1,9 @@
 const { Appointment, User, Payment, AuditLog, Op, sequelize } = require('../models');
 const { validationService } = require('../services/validationService');
-const { notificationService } = require('../services/notificationService');
+// ✅ CORRIGÉ: Import direct du service, pas de destructuration
+const notificationService = require('../services/notificationService');
 const { v4: uuidv4 } = require('uuid');
+
 const generateDefaultSlots = () => {
   const slots = [];
   for (let hour = 8; hour <= 17; hour++) {
@@ -12,14 +14,17 @@ const generateDefaultSlots = () => {
   }
   return slots;
 };
+
 const formatDate = (date) => {
   const d = new Date(date);
   return d.toISOString().split('T')[0];
 };
+
 const formatTime = (date) => {
   const d = new Date(date);
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 };
+
 const getAvailableSlots = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -77,6 +82,7 @@ const getAvailableSlots = async (req, res) => {
     });
   }
 };
+
 const getBookedSlots = async (req, res) => {
   try {
     const { doctorId } = req.params;
@@ -122,6 +128,7 @@ const getBookedSlots = async (req, res) => {
     });
   }
 };
+
 const createAppointment = async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
@@ -209,17 +216,43 @@ const createAppointment = async (req, res) => {
         }
       ]
     });
+
+    // ✅ CORRIGÉ: Vérification explicite du service de notification
     try {
+      console.log('📧 Tentative de création de notification...');
+      console.log('📦 notificationService disponible?', !!notificationService);
+      console.log('📦 notificationService.createNotification?', typeof notificationService.createNotification);
+      
+      if (!notificationService || typeof notificationService.createNotification !== 'function') {
+        throw new Error('notificationService non initialisé correctement');
+      }
+      
+      // ✅ Récupérer le nom complet du patient depuis req.user
+      const patientFirstName = req.user.firstName || 'Patient';
+      const patientLastName = req.user.lastName || '';
+      
       await notificationService.createNotification({
         userId: doctorId,
         type: 'new_appointment',
         title: 'Nouveau rendez-vous',
-        message: `Nouveau rendez-vous avec ${req.user.firstName} ${req.user.lastName} le ${new Date(appointmentDate).toLocaleDateString('fr-FR')} à ${timeStr}`,
-        data: { appointmentId: appointment.id }
+        message: `Nouveau rendez-vous avec ${patientFirstName} ${patientLastName} le ${new Date(appointmentDate).toLocaleDateString('fr-FR')} à ${timeStr}`,
+        data: { 
+          appointmentId: appointment.id,
+          patientName: `${patientFirstName} ${patientLastName}`.trim(),
+          date: appointmentDate,
+          time: timeStr
+        }
       });
+      console.log('✅ Notification créée avec succès');
     } catch (notifError) {
-      console.warn('⚠️ Erreur lors de la création de la notification:', notifError.message);
+      console.error('❌ Erreur lors de la création de la notification:', {
+        message: notifError.message,
+        stack: notifError.stack,
+        service: !!notificationService
+      });
+      // Ne pas bloquer la création du rendez-vous
     }
+
     try {
       await AuditLog.create({
         action: 'APPOINTMENT_CREATED',
@@ -236,6 +269,7 @@ const createAppointment = async (req, res) => {
     } catch (auditError) {
       console.warn('⚠️ Erreur lors de la création du log d\'audit:', auditError.message);
     }
+    
     console.log(`✅ Rendez-vous créé avec succès: ${newAppointment.id} le ${dateStr} à ${timeStr}`);
     res.status(201).json({
       success: true,
@@ -252,6 +286,7 @@ const createAppointment = async (req, res) => {
     });
   }
 };
+
 const getAllAppointments = async (req, res) => {
   try {
     console.log('📋 Récupération de TOUS les rendez-vous...');
@@ -284,6 +319,7 @@ const getAllAppointments = async (req, res) => {
     });
   }
 };
+
 const getAppointments = async (req, res) => {
   try {
     const { page = 1, limit = 20, status, type, filter = 'all' } = req.query;
@@ -381,6 +417,7 @@ const getAppointments = async (req, res) => {
     });
   }
 };
+
 const getAppointmentById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -434,6 +471,7 @@ const getAppointmentById = async (req, res) => {
     });
   }
 };
+
 const cancelAppointment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -477,13 +515,15 @@ const cancelAppointment = async (req, res) => {
       ? appointment.doctorId 
       : appointment.patientId;
     try {
-      await notificationService.createNotification({
-        userId: notificationUserId,
-        type: 'appointment_cancelled',
-        title: 'Rendez-vous annulé',
-        message: `Le rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} à ${formatTime(appointment.appointmentDate)} a été annulé.`,
-        data: { appointmentId: appointment.id }
-      });
+      if (notificationService && typeof notificationService.createNotification === 'function') {
+        await notificationService.createNotification({
+          userId: notificationUserId,
+          type: 'appointment_cancelled',
+          title: 'Rendez-vous annulé',
+          message: `Le rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} à ${formatTime(appointment.appointmentDate)} a été annulé.`,
+          data: { appointmentId: appointment.id }
+        });
+      }
     } catch (notifError) {
       console.warn('⚠️ Erreur notification:', notifError.message);
     }
@@ -502,6 +542,7 @@ const cancelAppointment = async (req, res) => {
     });
   }
 };
+
 const confirmAppointment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -543,18 +584,20 @@ const confirmAppointment = async (req, res) => {
       confirmedAt: new Date()
     });
     try {
-      await notificationService.createNotification({
-        userId: appointment.patientId,
-        type: 'appointment_confirmed',
-        title: '✅ Rendez-vous confirmé',
-        message: `Votre rendez-vous avec Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName} le ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} à ${new Date(appointment.appointmentDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} a été confirmé.`,
-        data: { 
-          appointmentId: appointment.id,
-          doctorName: `Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName}`,
-          date: appointment.appointmentDate
-        }
-      });
-      console.log(`📧 Notification envoyée au patient ${appointment.patientId}`);
+      if (notificationService && typeof notificationService.createNotification === 'function') {
+        await notificationService.createNotification({
+          userId: appointment.patientId,
+          type: 'appointment_confirmed',
+          title: '✅ Rendez-vous confirmé',
+          message: `Votre rendez-vous avec Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName} le ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} à ${new Date(appointment.appointmentDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} a été confirmé.`,
+          data: { 
+            appointmentId: appointment.id,
+            doctorName: `Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName}`,
+            date: appointment.appointmentDate
+          }
+        });
+        console.log(`📧 Notification envoyée au patient ${appointment.patientId}`);
+      }
     } catch (notifError) {
       console.warn('⚠️ Erreur envoi notification:', notifError.message);
     }
@@ -592,6 +635,7 @@ const confirmAppointment = async (req, res) => {
     });
   }
 };
+
 const completeAppointment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -622,13 +666,15 @@ const completeAppointment = async (req, res) => {
       completedAt: new Date()
     });
     try {
-      await notificationService.createNotification({
-        userId: appointment.patientId,
-        type: 'appointment_completed',
-        title: 'Rendez-vous terminé',
-        message: `Votre rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} est terminé.`,
-        data: { appointmentId: appointment.id }
-      });
+      if (notificationService && typeof notificationService.createNotification === 'function') {
+        await notificationService.createNotification({
+          userId: appointment.patientId,
+          type: 'appointment_completed',
+          title: 'Rendez-vous terminé',
+          message: `Votre rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} est terminé.`,
+          data: { appointmentId: appointment.id }
+        });
+      }
     } catch (notifError) {
       console.warn('⚠️ Erreur notification:', notifError.message);
     }
@@ -647,6 +693,7 @@ const completeAppointment = async (req, res) => {
     });
   }
 };
+
 const updateAppointmentStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -693,6 +740,7 @@ const updateAppointmentStatus = async (req, res) => {
     });
   }
 };
+
 const rateAppointment = async (req, res) => {
   try {
     const { id } = req.params;
@@ -744,6 +792,7 @@ const rateAppointment = async (req, res) => {
     });
   }
 };
+
 const getDashboardStats = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -801,6 +850,7 @@ const getDashboardStats = async (req, res) => {
     });
   }
 };
+
 module.exports = {
   getAvailableSlots,
   getBookedSlots,
