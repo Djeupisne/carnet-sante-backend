@@ -5,33 +5,32 @@ const path = require('path');
 
 const db = {};
 
-// ✅ LISTE DES FICHIERS DE MODÈLES (ceux que vous m'avez montrés)
+// ✅ LISTE DES FICHIERS DE MODÈLES
 const modelFiles = [
   'MedicalFile.js',
   'Payment.js',
   'Notification.js',
-  'User.js',          // Assurez-vous d'avoir ce fichier
-  'Appointment.js',   // Assurez-vous d'avoir ce fichier
-  'AuditLog.js',      // Assurez-vous d'avoir ce fichier
-  'Review.js',        // Assurez-vous d'avoir ce fichier
-  'Calendar.js'       // À créer si nécessaire
+  'User.js',
+  'Appointment.js',
+  'AuditLog.js',
+  'Review.js',
+  'Calendar.js'
 ];
 
-// ✅ CHARGER CHAQUE MODÈLE DIRECTEMENT (SANS LES APPELER COMME DES FONCTIONS)
+// ✅ CHARGER CHAQUE MODÈLE DIRECTEMENT
 modelFiles.forEach(file => {
   try {
     const modelPath = path.join(__dirname, file);
     
-    // Vérifier si le fichier existe
     if (fs.existsSync(modelPath)) {
       const model = require(modelPath);
       
-      // ✅ VOS MODÈLES SONT DÉJÀ DES INSTANCES DE sequelize.define !
       if (model && model.name) {
         db[model.name] = model;
         console.log(`✅ Modèle chargé: ${model.name}`);
       } else {
         console.warn(`⚠️ ${file} n'a pas de propriété 'name'`);
+        createModelDynamically(file.replace('.js', ''));
       }
     } else {
       console.log(`📝 Fichier ${file} non trouvé, création dynamique...`);
@@ -39,12 +38,11 @@ modelFiles.forEach(file => {
     }
   } catch (error) {
     console.error(`❌ Erreur lors du chargement de ${file}:`, error.message);
-    // Créer le modèle dynamiquement en cas d'erreur
     createModelDynamically(file.replace('.js', ''));
   }
 });
 
-// ✅ CRÉATION DYNAMIQUE DES MODÈLES MANQUANTS
+// ✅ CRÉATION DYNAMIQUE DES MODÈLES
 function createModelDynamically(modelName) {
   console.log(`🔄 Création dynamique du modèle ${modelName}...`);
   
@@ -61,7 +59,6 @@ function createModelDynamically(modelName) {
     indexes: []
   };
 
-  // Définir les attributs selon le modèle
   switch(modelName) {
     case 'User':
       attributes = {
@@ -69,10 +66,12 @@ function createModelDynamically(modelName) {
         firstName: DataTypes.STRING,
         lastName: DataTypes.STRING,
         email: { type: DataTypes.STRING, unique: true },
-        role: DataTypes.STRING,
+        role: { type: DataTypes.STRING, defaultValue: 'patient' },
         specialty: DataTypes.STRING,
         consultationPrice: { type: DataTypes.INTEGER, defaultValue: 50 },
-        isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+        isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+        phoneNumber: DataTypes.STRING,
+        password: DataTypes.STRING
       };
       break;
       
@@ -83,14 +82,46 @@ function createModelDynamically(modelName) {
         doctorId: { type: DataTypes.UUID, allowNull: false },
         appointmentDate: { type: DataTypes.DATE, allowNull: false },
         duration: { type: DataTypes.INTEGER, defaultValue: 30 },
-        status: { type: DataTypes.STRING, defaultValue: 'pending' },
-        type: { type: DataTypes.STRING, defaultValue: 'in_person' },
-        reason: DataTypes.TEXT
+        status: { 
+          type: DataTypes.ENUM('pending', 'confirmed', 'completed', 'cancelled', 'no_show'),
+          defaultValue: 'pending'
+        },
+        type: { 
+          type: DataTypes.ENUM('in_person', 'teleconsultation', 'home_visit'),
+          defaultValue: 'in_person'
+        },
+        reason: DataTypes.TEXT,
+        symptoms: DataTypes.JSONB,
+        notes: DataTypes.TEXT
       };
       options.indexes = [
         { fields: ['patientId'] },
         { fields: ['doctorId'] },
-        { fields: ['appointmentDate'] }
+        { fields: ['appointmentDate'] },
+        { fields: ['status'] }
+      ];
+      break;
+      
+    case 'Notification':  // ✅ CORRIGÉ - VERSION COMPLÈTE
+      attributes = {
+        ...attributes,
+        userId: { type: DataTypes.UUID, allowNull: false },
+        type: { type: DataTypes.STRING, allowNull: false },
+        title: { type: DataTypes.STRING, allowNull: false },
+        message: { type: DataTypes.TEXT, allowNull: false },
+        data: { type: DataTypes.JSONB, defaultValue: {} },
+        isRead: { type: DataTypes.BOOLEAN, defaultValue: false },
+        priority: { 
+          type: DataTypes.ENUM('low', 'medium', 'high', 'urgent'),
+          defaultValue: 'medium'
+        },
+        scheduledFor: { type: DataTypes.DATE },
+        sentAt: { type: DataTypes.DATE }
+      };
+      options.indexes = [
+        { fields: ['userId'] },
+        { fields: ['userId', 'isRead'] },
+        { fields: ['scheduledFor'] }
       ];
       break;
       
@@ -108,11 +139,44 @@ function createModelDynamically(modelName) {
       ];
       break;
       
+    case 'MedicalFile':
+      attributes = {
+        ...attributes,
+        patientId: { type: DataTypes.UUID, allowNull: false },
+        doctorId: { type: DataTypes.UUID, allowNull: false },
+        recordType: { type: DataTypes.STRING, allowNull: false },
+        title: { type: DataTypes.STRING, allowNull: false },
+        description: DataTypes.TEXT,
+        diagnosis: DataTypes.TEXT,
+        symptoms: DataTypes.JSONB,
+        medications: DataTypes.JSONB,
+        consultationDate: { type: DataTypes.DATE, allowNull: false }
+      };
+      break;
+      
+    case 'Payment':
+      attributes = {
+        ...attributes,
+        appointmentId: { type: DataTypes.UUID, allowNull: false },
+        patientId: { type: DataTypes.UUID, allowNull: false },
+        doctorId: { type: DataTypes.UUID, allowNull: false },
+        amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+        currency: { type: DataTypes.STRING, defaultValue: 'EUR' },
+        status: { 
+          type: DataTypes.ENUM('pending', 'completed', 'failed', 'refunded'),
+          defaultValue: 'pending'
+        },
+        paymentMethod: { type: DataTypes.STRING },
+        transactionId: { type: DataTypes.STRING, unique: true },
+        paymentDate: DataTypes.DATE
+      };
+      break;
+      
     case 'AuditLog':
       attributes = {
         ...attributes,
         userId: DataTypes.UUID,
-        action: DataTypes.STRING,
+        action: { type: DataTypes.STRING, allowNull: false },
         ipAddress: DataTypes.STRING,
         userAgent: DataTypes.TEXT,
         details: DataTypes.JSONB
@@ -131,14 +195,18 @@ function createModelDynamically(modelName) {
       break;
   }
 
-  // Créer le modèle avec sequelize.define
-  const Model = sequelize.define(modelName, attributes, options);
+  const Model = sequelize.define(modelName, attributes, {
+    ...options,
+    timestamps: true,
+    paranoid: modelName === 'User' ? true : false
+  });
+  
   db[Model.name] = Model;
   console.log(`✅ Modèle ${modelName} créé dynamiquement`);
 }
 
 // ✅ VÉRIFIER LES MODÈLES CRITIQUES
-const criticalModels = ['User', 'Appointment', 'MedicalFile', 'Payment', 'Notification', 'Calendar'];
+const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment'];
 criticalModels.forEach(modelName => {
   if (!db[modelName]) {
     createModelDynamically(modelName);
@@ -173,10 +241,16 @@ function setupAssociations() {
     console.log('✅ Associations Appointment-Payment');
   }
 
-  // User ↔ Notification
+  // ✅ User ↔ Notification - CORRIGÉ
   if (db.User && db.Notification) {
-    db.User.hasMany(db.Notification, { as: 'notifications', foreignKey: 'userId' });
-    db.Notification.belongsTo(db.User, { as: 'user', foreignKey: 'userId' });
+    db.User.hasMany(db.Notification, { 
+      as: 'notifications', 
+      foreignKey: 'userId' 
+    });
+    db.Notification.belongsTo(db.User, { 
+      as: 'user', 
+      foreignKey: 'userId' 
+    });
     console.log('✅ Associations User-Notification');
   }
 
@@ -215,11 +289,11 @@ function setupAssociations() {
 // Exécuter les associations
 setupAssociations();
 
-// ✅ SYNCHRONISATION SANS ALTER (CRITIQUE)
+// ✅ SYNCHRONISATION SANS ALTER
 const syncModels = async () => {
   try {
     await sequelize.sync({ 
-      alter: false,  // ← NE PAS MODIFIER LA STRUCTURE EXISTANTE
+      alter: false,
       force: false,
       logging: false
     });
@@ -228,7 +302,6 @@ const syncModels = async () => {
   } catch (error) {
     console.error('❌ Erreur synchronisation:', error.message);
     
-    // Tentative sans options
     try {
       await sequelize.sync({ force: false, logging: false });
       console.log('✅ Synchronisation mode secours réussie');
