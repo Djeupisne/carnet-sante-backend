@@ -14,7 +14,7 @@ const { logger } = require('./utils/logger');
 const app = express();
 
 // ✅ CORRIGÉ DÉFINITIF : Configuration trust proxy pour Render
-app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']); // ✅ Configuration complète
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']);
 
 // ✅ MIDDLEWARE CORS CRITIQUE - PLACÉ EN PREMIER
 app.use((req, res, next) => {
@@ -94,9 +94,8 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // ✅ Configuration spécifique pour éviter l'erreur
   validate: { 
-    trustProxy: false // Désactive la validation X-Forwarded-For
+    trustProxy: false
   }
 });
 app.use(limiter);
@@ -116,7 +115,7 @@ app.use(express.urlencoded({
   limit: '50mb'
 }));
 
-// 🔍 MIDDLEWARE DE DEBUG CRITIQUE - DOIT ÊTRE JUSTE APRÈS express.json()
+// 🔍 MIDDLEWARE DE DEBUG CRITIQUE
 app.use((req, res, next) => {
   if (req.path === '/api/auth/register' || req.path === '/api/auth/login') {
     console.log('\n🔍 === DEBUG: BODY REÇU PAR EXPRESS ===');
@@ -185,7 +184,7 @@ app.use('/api/payments', require('./routes/payment'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/calendars', require('./routes/calendar'));
+app.use('/api/calendars', require('./routes/calendar')); // ✅ IMPORTANT: Routes des disponibilités
 app.use('/api/users', require('./routes/users'));
 app.use('/api/doctors', require('./routes/doctors'));
 
@@ -273,7 +272,9 @@ app.get('/', (req, res) => {
       admin: '/api/admin',
       search: '/api/search',
       notifications: '/api/notifications',
-      users: '/api/users'
+      users: '/api/users',
+      calendars: '/api/calendars', // ✅ Ajouté
+      doctors: '/api/doctors'
     }
   });
 });
@@ -310,6 +311,29 @@ app.get('/api/cors-test', (req, res) => {
   });
 });
 
+// ✅ ROUTE DE TEST POUR VÉRIFIER LES DISPONIBILITÉS
+app.get('/api/test-availability/:doctorId', async (req, res) => {
+  try {
+    const { doctorId } = req.params;
+    const { date } = req.query;
+    
+    // Importer le modèle Calendar
+    const { Calendar } = require('./models/calendar');
+    
+    let calendar = await Calendar.findOne({
+      where: { doctorId, date: date || new Date().toISOString().split('T')[0] }
+    });
+    
+    res.json({
+      success: true,
+      message: calendar ? '✅ Disponibilités trouvées' : '⚠️ Aucune disponibilité',
+      data: calendar || { doctorId, date, slots: [] }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Gestion des routes non trouvées
 app.use(notFound);
 
@@ -322,7 +346,7 @@ const startServer = async () => {
   try {
     console.log('🚀 Démarrage du serveur Carnet de Santé...');
     
-    // ✅ CRITIQUE : Démarrer le serveur IMMÉDIATEMENT pour que Render détecte le port
+    // ✅ CRITIQUE : Démarrer le serveur IMMÉDIATEMENT
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log('\n🎉 SERVEUR DÉMARRÉ AVEC SUCCÈS!');
       console.log('=================================');
@@ -339,25 +363,77 @@ const startServer = async () => {
       console.log('=================================\n');
     });
     
-    // Connecter à la DB après que le serveur soit démarré
+    // ✅ CONNEXION À LA BASE DE DONNÉES
     console.log('🔄 Connexion à la base de données...');
     const dbConnected = await testConnection();
+    
     if (!dbConnected) {
       console.warn('⚠️ Impossible de se connecter à la base de données, mais le serveur continue');
     } else {
       console.log('✅ Base de données connectée');
       
+      // ✅ IMPORTANT: Synchroniser les modèles DANS LE BON ORDRE
       console.log('🔄 Synchronisation des modèles...');
+      
+      // 1. D'abord les modèles principaux
       await sequelize.sync({ 
-        alter: false,
+        alter: true, // Changé de false à true pour créer les tables manquantes
         force: false,
         logging: false
       });
-      console.log('✅ Modèles synchronisés');
+      
+      console.log('✅ Modèles principaux synchronisés');
+      
+      // 2. Vérifier et créer le modèle Calendar s'il n'existe pas
+      try {
+        const { Calendar } = require('./models/calendar');
+        
+        // Synchroniser spécifiquement le modèle Calendar
+        await Calendar.sync({ alter: true });
+        console.log('✅ Modèle Calendar synchronisé avec succès');
+        
+        // ✅ OPTIONNEL: Créer automatiquement des disponibilités pour les médecins existants
+        const { User } = require('./models');
+        const doctors = await User.findAll({
+          where: { role: 'doctor', isActive: true }
+        });
+        
+        if (doctors.length > 0) {
+          console.log(`👨‍⚕️ ${doctors.length} médecins trouvés, vérification des disponibilités...`);
+          
+          const today = new Date().toISOString().split('T')[0];
+          const defaultSlots = [
+            '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+            '11:00', '11:30', '14:00', '14:30', '15:00', '15:30',
+            '16:00', '16:30', '17:00'
+          ];
+          
+          for (const doctor of doctors) {
+            const existing = await Calendar.findOne({
+              where: { doctorId: doctor.id, date: today }
+            });
+            
+            if (!existing) {
+              await Calendar.create({
+                doctorId: doctor.id,
+                date: today,
+                slots: defaultSlots,
+                confirmed: false,
+                versions: []
+              });
+              console.log(`   ✅ Disponibilités créées pour Dr. ${doctor.firstName} ${doctor.lastName}`);
+            }
+          }
+          console.log('✅ Disponibilités initiales créées');
+        }
+      } catch (calendarError) {
+        console.error('❌ Erreur lors de la synchronisation du modèle Calendar:', calendarError.message);
+      }
+      
+      console.log('✅ Tous les modèles sont prêts');
     }
   } catch (error) {
     console.error('❌ ERREUR lors du démarrage:', error);
-    // Ne pas exit(1) - le serveur peut fonctionner sans DB pour les health checks
   }
 };
 
@@ -385,3 +461,5 @@ process.on('unhandledRejection', (reason, promise) => {
 
 // Démarrer le serveur
 startServer();
+
+module.exports = app;
