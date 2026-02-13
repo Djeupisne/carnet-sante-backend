@@ -15,9 +15,18 @@ const Notification = sequelize.define('Notification', {
       key: 'id'
     }
   },
+  // ✅ CORRIGÉ - Ajout de tous les types de notifications pour les rendez-vous
   type: {
     type: DataTypes.ENUM(
+      // Notifications de rendez-vous
+      'new_appointment',
+      'appointment_confirmed',
+      'appointment_cancelled',
+      'appointment_completed',
       'appointment_reminder',
+      'appointment_update',
+      
+      // Autres notifications
       'new_message',
       'medical_result',
       'payment_confirmation',
@@ -35,12 +44,14 @@ const Notification = sequelize.define('Notification', {
     allowNull: false
   },
   data: {
-    type: DataTypes.JSONB
+    type: DataTypes.JSONB,
+    defaultValue: {}
   },
   isRead: {
     type: DataTypes.BOOLEAN,
     defaultValue: false
   },
+  // ✅ CORRIGÉ - Gardé comme ENUM car c'est standard
   priority: {
     type: DataTypes.ENUM('low', 'medium', 'high', 'urgent'),
     defaultValue: 'medium'
@@ -52,7 +63,11 @@ const Notification = sequelize.define('Notification', {
     type: DataTypes.DATE
   }
 }, {
+  tableName: 'Notifications',
   indexes: [
+    {
+      fields: ['userId']
+    },
     {
       fields: ['userId', 'isRead']
     },
