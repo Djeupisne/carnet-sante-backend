@@ -184,7 +184,7 @@ app.use('/api/payments', require('./routes/payment'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/calendars', require('./routes/calendar')); // ✅ IMPORTANT: Routes des disponibilités
+app.use('/api/calendars', require('./routes/calendar'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/doctors', require('./routes/doctors'));
 
@@ -273,7 +273,7 @@ app.get('/', (req, res) => {
       search: '/api/search',
       notifications: '/api/notifications',
       users: '/api/users',
-      calendars: '/api/calendars', // ✅ Ajouté
+      calendars: '/api/calendars',
       doctors: '/api/doctors'
     }
   });
@@ -311,17 +311,27 @@ app.get('/api/cors-test', (req, res) => {
   });
 });
 
-// ✅ ROUTE DE TEST POUR VÉRIFIER LES DISPONIBILITÉS
+// ✅ ROUTE DE TEST POUR VÉRIFIER LES DISPONIBILITÉS - CORRIGÉE
 app.get('/api/test-availability/:doctorId', async (req, res) => {
   try {
     const { doctorId } = req.params;
     const { date } = req.query;
     
-    // Importer le modèle Calendar
-    const { Calendar } = require('./models/calendar');
+    // ✅ CORRIGÉ: Importer depuis ./models, PAS depuis ./models/calendar
+    const { Calendar } = require('./models');
+    
+    if (!Calendar) {
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Modèle Calendar non disponible' 
+      });
+    }
     
     let calendar = await Calendar.findOne({
-      where: { doctorId, date: date || new Date().toISOString().split('T')[0] }
+      where: { 
+        doctorId, 
+        date: date || new Date().toISOString().split('T')[0] 
+      }
     });
     
     res.json({
@@ -330,7 +340,11 @@ app.get('/api/test-availability/:doctorId', async (req, res) => {
       data: calendar || { doctorId, date, slots: [] }
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('❌ Erreur test availability:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 });
 
@@ -372,59 +386,67 @@ const startServer = async () => {
     } else {
       console.log('✅ Base de données connectée');
       
-      // ✅ IMPORTANT: Synchroniser les modèles DANS LE BON ORDRE
+      // ✅ IMPORTANT: Synchronisation SANS alter:true pour éviter les erreurs
       console.log('🔄 Synchronisation des modèles...');
       
-      // 1. D'abord les modèles principaux
+      // ✅ CORRIGÉ: alter: false pour éviter les erreurs de migration PostgreSQL
       await sequelize.sync({ 
-        alter: true, // Changé de false à true pour créer les tables manquantes
+        alter: false,  // ← CRITIQUE: Ne pas forcer les migrations
         force: false,
         logging: false
       });
       
       console.log('✅ Modèles principaux synchronisés');
       
-      // 2. Vérifier et créer le modèle Calendar s'il n'existe pas
+      // ✅ CORRIGÉ: Calendar est DÉJÀ dans db via models/index.js
       try {
-        const { Calendar } = require('./models/calendar');
+        // ✅ Importer depuis ./models, PAS depuis ./models/calendar
+        const { Calendar, User } = require('./models');
         
-        // Synchroniser spécifiquement le modèle Calendar
-        await Calendar.sync({ alter: true });
-        console.log('✅ Modèle Calendar synchronisé avec succès');
-        
-        // ✅ OPTIONNEL: Créer automatiquement des disponibilités pour les médecins existants
-        const { User } = require('./models');
-        const doctors = await User.findAll({
-          where: { role: 'doctor', isActive: true }
-        });
-        
-        if (doctors.length > 0) {
-          console.log(`👨‍⚕️ ${doctors.length} médecins trouvés, vérification des disponibilités...`);
+        if (!Calendar) {
+          console.warn('⚠️ Modèle Calendar non trouvé dans db');
+        } else {
+          console.log('✅ Modèle Calendar trouvé dans db');
           
-          const today = new Date().toISOString().split('T')[0];
-          const defaultSlots = [
-            '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
-            '11:00', '11:30', '14:00', '14:30', '15:00', '15:30',
-            '16:00', '16:30', '17:00'
-          ];
+          // ✅ Synchroniser avec alter: false
+          await Calendar.sync({ alter: false, force: false });
+          console.log('✅ Modèle Calendar synchronisé');
           
-          for (const doctor of doctors) {
-            const existing = await Calendar.findOne({
-              where: { doctorId: doctor.id, date: today }
-            });
+          // ✅ Créer automatiquement des disponibilités pour les médecins
+          const doctors = await User.findAll({
+            where: { role: 'doctor', isActive: true }
+          });
+          
+          if (doctors.length > 0) {
+            console.log(`👨‍⚕️ ${doctors.length} médecins trouvés, vérification des disponibilités...`);
             
-            if (!existing) {
-              await Calendar.create({
-                doctorId: doctor.id,
-                date: today,
-                slots: defaultSlots,
-                confirmed: false,
-                versions: []
+            const today = new Date().toISOString().split('T')[0];
+            const defaultSlots = [
+              '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+              '11:00', '11:30', '14:00', '14:30', '15:00', '15:30',
+              '16:00', '16:30', '17:00'
+            ];
+            
+            let created = 0;
+            for (const doctor of doctors) {
+              const existing = await Calendar.findOne({
+                where: { doctorId: doctor.id, date: today }
               });
-              console.log(`   ✅ Disponibilités créées pour Dr. ${doctor.firstName} ${doctor.lastName}`);
+              
+              if (!existing) {
+                await Calendar.create({
+                  doctorId: doctor.id,
+                  date: today,
+                  slots: defaultSlots,
+                  confirmed: false,
+                  versions: []
+                });
+                created++;
+                console.log(`   ✅ Disponibilités créées pour Dr. ${doctor.firstName} ${doctor.lastName}`);
+              }
             }
+            console.log(`✅ ${created} disponibilités créées pour aujourd'hui`);
           }
-          console.log('✅ Disponibilités initiales créées');
         }
       } catch (calendarError) {
         console.error('❌ Erreur lors de la synchronisation du modèle Calendar:', calendarError.message);
