@@ -1,51 +1,56 @@
 const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-module.exports = (sequelize) => {
-  const Calendar = sequelize.define('Calendar', {
-    id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
-      primaryKey: true,
-    },
-    date: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    slots: {
-      type: DataTypes.JSON,
-      allowNull: false,
-      defaultValue: []
-    },
-    confirmed: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-    doctorId: {
-      type: DataTypes.UUID,
-      allowNull: false,
-    },
-    versions: {
-      type: DataTypes.JSON,
-      defaultValue: [],
+// ✅ Définition DIRECTE du modèle (pas de factory function)
+const Calendar = sequelize.define('Calendar', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+  date: {
+    type: DataTypes.STRING,  // ✅ Garder STRING pour éviter les erreurs de migration
+    allowNull: false,
+  },
+  slots: {
+    type: DataTypes.JSON,
+    allowNull: false,
+    defaultValue: []
+  },
+  confirmed: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+  },
+  doctorId: {
+    type: DataTypes.UUID,
+    allowNull: false,
+    references: {
+      model: 'Users',
+      key: 'id'
     }
-  }, {
-    tableName: 'Calendars',
-    indexes: [
-      {
-        unique: true,
-        fields: ['doctorId', 'date']
-      }
-    ]
-  });
-
-  Calendar.associate = function(models) {
-    if (models.User) {
-      Calendar.belongsTo(models.User, {
-        as: 'doctor',
-        foreignKey: 'doctorId'
-      });
+  },
+  versions: {
+    type: DataTypes.JSON,
+    defaultValue: [],
+  }
+}, {
+  tableName: 'Calendars',
+  indexes: [
+    {
+      unique: true,
+      fields: ['doctorId', 'date']
     }
-  };
+  ]
+});
 
-  return Calendar;
+// ✅ Association (sera appelée par models/index.js)
+Calendar.associate = function(models) {
+  if (models.User) {
+    Calendar.belongsTo(models.User, {
+      as: 'doctor',
+      foreignKey: 'doctorId'
+    });
+  }
 };
+
+module.exports = Calendar;
