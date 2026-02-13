@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { User, MedicalFile, Appointment, AuditLog } = require('../models');
 const { validationService } = require('../services/validationService');
 const { encryptionService } = require('../services/encryptionService');
