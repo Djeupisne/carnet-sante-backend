@@ -400,23 +400,8 @@ const login = async (req, res) => {
 
       console.log('🔑 Token admin généré avec UUID:', adminId);
 
-      // ✅ PROPER FIX: Créer un log d'audit avec userId = null pour les admins
-      try {
-        await AuditLog.create({
-          action: 'ADMIN_LOGIN',
-          userId: null, // ✅ userId null car admin n'existe pas en base
-          userRole: 'admin',
-          ipAddress: req.ip || '127.0.0.1',
-          userAgent: req.get('User-Agent'),
-          details: { 
-            email: adminUser.email,
-            adminId: adminId // On stocke l'UUID dans details pour traçabilité
-          }
-        });
-        console.log('📝 Log d\'audit admin créé avec userId null');
-      } catch (auditError) {
-        console.warn('⚠️ Erreur non-bloquante du log d\'audit:', auditError.message);
-      }
+      // ✅ QUICK FIX: Ne pas créer de log d'audit pour les admins
+      console.log('⏭️ Log d\'audit ignoré pour admin (userId n\'existe pas en base)');
 
       logger.info('Connexion admin réussie', {
         email: adminUser.email
@@ -515,7 +500,6 @@ const login = async (req, res) => {
       await AuditLog.create({
         action: 'USER_LOGIN',
         userId: user.id,
-        userRole: user.role,
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
@@ -711,7 +695,6 @@ const resetPassword = async (req, res) => {
       await AuditLog.create({
         action: 'PASSWORD_RESET',
         userId: user.id,
-        userRole: user.role,
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
@@ -834,7 +817,6 @@ const logout = async (req, res) => {
       await AuditLog.create({
         action: 'USER_LOGOUT',
         userId: req.user.id,
-        userRole: req.user.role,
         ipAddress: req.ip || '127.0.0.1',
         userAgent: req.get('User-Agent')
       });
