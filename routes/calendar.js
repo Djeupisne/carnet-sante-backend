@@ -4,9 +4,9 @@ const { sequelize } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const { logger } = require('../utils/logger');
 
-// ✅ NE PAS UTILISER sequelize.define ICI - Le modèle doit être dans models/index.js
-// ✅ Importer le modèle depuis models/index.js
-const { Calendar } = require('../models');
+// ✅ Importer les modèles depuis models/index.js
+const { Calendar, Appointment, User } = require('../models');
+const { Op } = require('sequelize');
 
 // Middleware pour vérifier que l'utilisateur est un médecin
 const isDoctor = (req, res, next) => {
@@ -80,9 +80,6 @@ router.get('/available-slots/:doctorId', async (req, res) => {
     }
 
     // 3. Récupérer les rendez-vous déjà réservés
-    const { Appointment } = sequelize.models;
-    const { Op } = require('sequelize');
-    
     const bookedAppointments = await Appointment.findAll({
       where: {
         doctorId,
@@ -163,13 +160,16 @@ router.get('/', isDoctor, async (req, res, next) => {
 router.get('/all', isAdmin, async (req, res, next) => {
   try {
     const calendars = await Calendar.findAll({
-      include: [{ model: sequelize.models.User, attributes: ['firstName', 'lastName'] }],
+      include: [{ model: User, as: 'doctor', attributes: ['firstName', 'lastName'] }],
       order: [['date', 'DESC']]
     });
     res.json({ success: true, data: calendars });
   } catch (error) {
     logger.error('Erreur lors de la récupération de tous les calendriers:', error);
-    next(error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur lors de la récupération des calendriers' 
+    });
   }
 });
 
@@ -178,14 +178,14 @@ router.get('/all', isAdmin, async (req, res, next) => {
  */
 router.get('/patient/:patientId', async (req, res, next) => {
   try {
-    const appointments = await sequelize.models.Appointment.findAll({
+    const appointments = await Appointment.findAll({
       where: { patientId: req.params.patientId },
       attributes: ['doctorId'],
     });
     const doctorIds = appointments.map((appt) => appt.doctorId);
     const calendars = await Calendar.findAll({
       where: { doctorId: doctorIds },
-      include: [{ model: sequelize.models.User, attributes: ['firstName', 'lastName'] }],
+      include: [{ model: User, as: 'doctor', attributes: ['firstName', 'lastName'] }],
     });
     res.json({ success: true, data: calendars });
   } catch (error) {
@@ -244,9 +244,6 @@ router.post('/availability', isDoctor, async (req, res) => {
  */
 router.post('/seed-availabilities', isAdmin, async (req, res) => {
   try {
-    const { User } = sequelize.models;
-    const { Op } = require('sequelize');
-
     const doctors = await User.findAll({
       where: { 
         role: 'doctor',
@@ -383,10 +380,6 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
-// ============================================
-// 🆕 NOUVELLE ROUTE - CONFIRMER UN CALENDRIER
-// ============================================
-
 /**
  * ✅ Confirmer un calendrier
  * POST /api/calendars/:id/confirm
@@ -397,7 +390,6 @@ router.post('/:id/confirm', isDoctor, async (req, res, next) => {
     
     console.log(`📅 Confirmation calendrier demandée: ${calendarId} par ${req.user.id}`);
     
-    // Récupérer le calendrier
     const calendar = await Calendar.findByPk(calendarId);
     
     if (!calendar) {
@@ -408,7 +400,6 @@ router.post('/:id/confirm', isDoctor, async (req, res, next) => {
       });
     }
     
-    // Vérifier que le calendrier appartient au médecin
     if (calendar.doctorId !== req.user.id) {
       console.log(`❌ Calendrier ${calendarId} n'appartient pas au médecin ${req.user.id}`);
       return res.status(403).json({ 
@@ -417,15 +408,10 @@ router.post('/:id/confirm', isDoctor, async (req, res, next) => {
       });
     }
     
-    // Marquer comme confirmé
-    await calendar.update({ 
-      confirmed: true,
-      confirmedAt: new Date() // Si vous avez ce champ dans votre modèle
-    });
+    await calendar.update({ confirmed: true });
     
     console.log(`✅ Calendrier ${calendarId} confirmé avec succès`);
     
-    // Recharger le calendrier pour avoir les données à jour
     await calendar.reload();
     
     res.json({ 
@@ -440,10 +426,6 @@ router.post('/:id/confirm', isDoctor, async (req, res, next) => {
     next(error);
   }
 });
-
-// ============================================
-// 🆕 ROUTES OPTIONNELLES (pour fonctionnalités avancées)
-// ============================================
 
 /**
  * ✅ Sauvegarder une version du calendrier (historique)
@@ -467,7 +449,6 @@ router.post('/:id/version', isDoctor, async (req, res, next) => {
       });
     }
     
-    // Ajouter la version actuelle à l'historique
     const versions = calendar.versions || [];
     versions.push({
       date: calendar.date,
@@ -515,11 +496,6 @@ router.post('/:id/notify', isDoctor, async (req, res, next) => {
       });
     }
     
-    // TODO: Implémenter la logique de notification
-    // - Récupérer les patients ayant des RDV avec ce médecin à cette date
-    // - Envoyer emails/SMS/push notifications
-    // - Logger les notifications envoyées
-    
     console.log(`📧 Notification patients pour calendrier ${req.params.id}`);
     
     res.json({ 
@@ -530,7 +506,6 @@ router.post('/:id/notify', isDoctor, async (req, res, next) => {
   } catch (error) {
     console.error('❌ Erreur notification patients:', error);
     logger.error('Erreur lors de la notification des patients:', error);
-    // Ne pas bloquer si la notification échoue
     res.json({ 
       success: true,
       message: 'Calendrier mis à jour (notification échouée)'
