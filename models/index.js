@@ -290,7 +290,7 @@ function setupAssociations() {
     console.log('✅ Associations User-Review');
   }
 
-  // User ↔ AuditLog
+  // User ↔ AuditLog (sans contrainte)
   if (db.User && db.AuditLog) {
     db.User.hasMany(db.AuditLog, { 
       as: 'auditLogs', 
@@ -311,42 +311,63 @@ function setupAssociations() {
 // Exécuter les associations
 setupAssociations();
 
-// ✅ SUPPRESSION AUTOMATIQUE DE LA CONTRAINTE (OPTION 2)
+// ✅ SUPPRESSION DE LA CONTRAINTE AVEC SQL DIRECT (SOLUTION ROBUSTE)
 async function removeForeignKeyConstraint() {
   try {
     console.log('🔍 Vérification des contraintes sur AuditLogs...');
     
     // Vérifier si la contrainte existe
     const constraints = await sequelize.query(
-      `SELECT conname FROM pg_constraint 
+      `SELECT conname 
+       FROM pg_constraint 
        WHERE conrelid = 'AuditLogs'::regclass 
        AND conname = 'AuditLogs_userId_fkey'`,
       { type: sequelize.QueryTypes.SELECT }
     );
     
     if (constraints.length > 0) {
-      console.log('🗑️ Suppression de la contrainte AuditLogs_userId_fkey...');
+      console.log('🗑️ Suppression de la contrainte AuditLogs_userId_fkey avec SQL direct...');
       
-      // Supprimer la contrainte via queryInterface
-      const queryInterface = sequelize.getQueryInterface();
-      await queryInterface.removeConstraint('AuditLogs', 'AuditLogs_userId_fkey');
+      // Utiliser SQL direct au lieu de queryInterface
+      await sequelize.query(
+        `ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey";`
+      );
       
-      console.log('✅ Contrainte supprimée avec succès');
+      console.log('✅ Contrainte supprimée avec succès via SQL direct');
+      
+      // Vérifier que la contrainte a bien été supprimée
+      const checkAfter = await sequelize.query(
+        `SELECT conname 
+         FROM pg_constraint 
+         WHERE conrelid = 'AuditLogs'::regclass 
+         AND conname = 'AuditLogs_userId_fkey'`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+      
+      if (checkAfter.length === 0) {
+        console.log('✅ Vérification: contrainte bien supprimée');
+      } else {
+        console.log('⚠️ La contrainte existe toujours, tentative avec CASCADE...');
+        await sequelize.query(
+          `ALTER TABLE "AuditLogs" DROP CONSTRAINT "AuditLogs_userId_fkey" CASCADE;`
+        );
+        console.log('✅ Contrainte supprimée avec CASCADE');
+      }
     } else {
       console.log('✅ La contrainte AuditLogs_userId_fkey n\'existe pas');
     }
   } catch (error) {
     console.log('⚠️ Erreur lors de la suppression de la contrainte (ignorée):', error.message);
     
-    // Tentative alternative avec SQL direct
+    // Dernière tentative avec CASCADE
     try {
-      console.log('🔄 Tentative alternative avec SQL direct...');
+      console.log('🔄 Dernière tentative avec CASCADE...');
       await sequelize.query(
-        `ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey";`
+        `ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey" CASCADE;`
       );
-      console.log('✅ Contrainte supprimée via SQL direct');
-    } catch (sqlError) {
-      console.log('⚠️ Échec de la suppression SQL (ignoré):', sqlError.message);
+      console.log('✅ Contrainte supprimée avec CASCADE');
+    } catch (e) {
+      console.log('⚠️ Échec final (ignoré):', e.message);
     }
   }
 }
