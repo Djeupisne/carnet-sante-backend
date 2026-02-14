@@ -35,6 +35,58 @@ router.get('/patients', authenticate, async (req, res) => {
       });
     }
 
+    // Si c'est un médecin, ne récupérer que ses patients (via les rendez-vous)
+    if (req.user.role === 'doctor') {
+      const { Appointment } = require('../models');
+      const { Op } = require('sequelize');
+      
+      // Récupérer tous les IDs des patients qui ont eu des rendez-vous avec ce médecin
+      const appointments = await Appointment.findAll({
+        where: { 
+          doctorId: req.user.id,
+          status: {
+            [Op.in]: ['confirmed', 'completed', 'pending']
+          }
+        },
+        attributes: ['patientId'],
+        group: ['patientId']
+      });
+      
+      const patientIds = appointments.map(apt => apt.patientId);
+      
+      const patients = await User.findAll({
+        where: { 
+          id: { [Op.in]: patientIds },
+          role: 'patient',
+          isActive: true 
+        },
+        attributes: [
+          'id', 
+          'firstName', 
+          'lastName', 
+          'phoneNumber', 
+          'bloodType', 
+          'gender', 
+          'dateOfBirth',
+          'email',
+          'createdAt'
+        ],
+        order: [
+          ['lastName', 'ASC'],
+          ['firstName', 'ASC']
+        ]
+      });
+
+      logger.info(`[USERS] ✅ ${patients.length} patients récupérés pour le médecin ${req.user.id}`);
+      
+      return res.json({
+        success: true,
+        data: patients,
+        count: patients.length
+      });
+    }
+
+    // Si c'est un admin, voir tous les patients
     const patients = await User.findAll({
       where: { 
         role: 'patient',
@@ -59,7 +111,6 @@ router.get('/patients', authenticate, async (req, res) => {
 
     logger.info(`[USERS] ✅ ${patients.length} patients récupérés`);
     
-    // ✅ CORRECTION : Retourner dans le format attendu par le frontend
     res.json({
       success: true,
       data: patients,
@@ -91,6 +142,59 @@ router.get('/doctors', authenticate, async (req, res) => {
       userRole: req.user?.role
     });
 
+    // Si c'est un patient, ne récupérer que les médecins qu'il a consultés
+    if (req.user.role === 'patient') {
+      const { Appointment } = require('../models');
+      const { Op } = require('sequelize');
+      
+      const appointments = await Appointment.findAll({
+        where: { 
+          patientId: req.user.id,
+          status: {
+            [Op.in]: ['confirmed', 'completed', 'pending']
+          }
+        },
+        attributes: ['doctorId'],
+        group: ['doctorId']
+      });
+      
+      const doctorIds = appointments.map(apt => apt.doctorId);
+      
+      const doctors = await User.findAll({
+        where: { 
+          id: { [Op.in]: doctorIds },
+          role: 'doctor',
+          isActive: true 
+        },
+        attributes: [
+          'id', 
+          'firstName', 
+          'lastName', 
+          'specialty', 
+          'isActive', 
+          'availability',
+          'email', 
+          'phoneNumber',
+          'bio',
+          'licenseNumber',
+          'createdAt'
+        ],
+        order: [
+          ['lastName', 'ASC'],
+          ['firstName', 'ASC']
+        ]
+      });
+
+      logger.info(`[USERS] ✅ ${doctors.length} médecins récupérés pour le patient ${req.user.id}`);
+      
+      return res.json({
+        success: true,
+        data: doctors,
+        count: doctors.length
+      });
+    }
+
+    // Sinon, voir tous les médecins (pour admin)
     const doctors = await User.findAll({
       where: { 
         role: 'doctor',
@@ -117,7 +221,6 @@ router.get('/doctors', authenticate, async (req, res) => {
 
     logger.info(`[USERS] ✅ ${doctors.length} médecins récupérés`);
     
-    // ✅ CORRECTION : Retourner dans le format attendu par le frontend
     res.json({
       success: true,
       data: doctors,
@@ -177,9 +280,14 @@ router.get('/dashboard/stats', authenticate, async (req, res) => {
         }
       });
 
-      const totalPatients = await User.count({
-        where: { role: 'patient', isActive: true }
+      // Compter les patients uniques de ce médecin
+      const uniquePatients = await Appointment.findAll({
+        where: { doctorId: userId },
+        attributes: ['patientId'],
+        group: ['patientId']
       });
+
+      const totalPatients = uniquePatients.length;
 
       stats = {
         totalAppointments,
@@ -209,11 +317,18 @@ router.get('/dashboard/stats', authenticate, async (req, res) => {
         }
       });
 
+      // Compter les médecins uniques de ce patient
+      const uniqueDoctors = await Appointment.findAll({
+        where: { patientId: userId },
+        attributes: ['doctorId'],
+        group: ['doctorId']
+      });
+
       stats = {
         totalAppointments,
         upcomingAppointments,
         completedAppointments: 0,
-        totalDoctors: await User.count({ where: { role: 'doctor', isActive: true } })
+        totalDoctors: uniqueDoctors.length
       };
     }
 
@@ -280,6 +395,7 @@ router.get('/', authenticate, async (req, res) => {
 
     // Définir les attributs à retourner selon le rôle
     let attributes;
+    let whereClause = { role };
     
     if (role === 'patient') {
       attributes = [
@@ -293,6 +409,27 @@ router.get('/', authenticate, async (req, res) => {
         'email',
         'createdAt'
       ];
+      
+      // Si c'est un médecin qui demande, ne montrer que SES patients
+      if (req.user.role === 'doctor') {
+        const { Appointment } = require('../models');
+        const { Op } = require('sequelize');
+        
+        const appointments = await Appointment.findAll({
+          where: { 
+            doctorId: req.user.id,
+            status: {
+              [Op.in]: ['confirmed', 'completed', 'pending']
+            }
+          },
+          attributes: ['patientId'],
+          group: ['patientId']
+        });
+        
+        const patientIds = appointments.map(apt => apt.patientId);
+        whereClause.id = { [Op.in]: patientIds };
+      }
+      
     } else if (role === 'doctor') {
       attributes = [
         'id', 
@@ -307,6 +444,26 @@ router.get('/', authenticate, async (req, res) => {
         'licenseNumber',
         'createdAt'
       ];
+      
+      // Si c'est un patient qui demande, ne montrer que SES médecins
+      if (req.user.role === 'patient') {
+        const { Appointment } = require('../models');
+        const { Op } = require('sequelize');
+        
+        const appointments = await Appointment.findAll({
+          where: { 
+            patientId: req.user.id,
+            status: {
+              [Op.in]: ['confirmed', 'completed', 'pending']
+            }
+          },
+          attributes: ['doctorId'],
+          group: ['doctorId']
+        });
+        
+        const doctorIds = appointments.map(apt => apt.doctorId);
+        whereClause.id = { [Op.in]: doctorIds };
+      }
     } else {
       attributes = [
         'id',
@@ -320,10 +477,7 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     const users = await User.findAll({
-      where: { 
-        role,
-        ...(role === 'doctor' ? { isActive: true } : {})
-      },
+      where: whereClause,
       attributes,
       order: [
         ['lastName', 'ASC'],
@@ -333,7 +487,6 @@ router.get('/', authenticate, async (req, res) => {
 
     logger.info(`[USERS] ✅ ${users.length} utilisateurs (${role}) récupérés`);
     
-    // ✅ CORRECTION : Retourner dans le format standard
     res.json({
       success: true,
       data: users,
@@ -379,19 +532,67 @@ router.get('/:id', authenticate, async (req, res) => {
       });
     }
 
-    // Vérification des permissions
-    if (req.user.role !== 'admin' && 
-        req.user.id !== id && 
-        !(req.user.role === 'doctor' && user.role === 'patient') &&
-        !(req.user.role === 'patient' && user.role === 'doctor')) {
-      logger.warn(`[USERS] ⛔ Accès non autorisé`, {
-        requestedBy: req.user.id,
-        requestedUser: id
-      });
-      return res.status(403).json({
-        success: false,
-        message: 'Accès non autorisé'
-      });
+    // ✅ PERMISSIONS CORRIGÉES - Les médecins ne voient que leurs patients
+    if (req.user.role !== 'admin' && req.user.id !== id) {
+      
+      // Si c'est un médecin qui veut voir un patient
+      if (req.user.role === 'doctor' && user.role === 'patient') {
+        // Vérifier si ce patient a déjà eu un rendez-vous avec ce médecin
+        const { Appointment } = require('../models');
+        const { Op } = require('sequelize');
+        
+        const hasAppointment = await Appointment.findOne({
+          where: {
+            doctorId: req.user.id,
+            patientId: user.id,
+            status: {
+              [Op.in]: ['confirmed', 'completed', 'pending']
+            }
+          }
+        });
+        
+        if (!hasAppointment) {
+          logger.warn(`[USERS] ⛔ Médecin ${req.user.id} tente d'accéder à un patient qui n'est pas le sien: ${id}`);
+          return res.status(403).json({
+            success: false,
+            message: 'Ce patient ne fait pas partie de vos patients'
+          });
+        }
+        
+        logger.info(`[USERS] ✅ Médecin accède à son patient: ${id}`);
+      }
+      // Si c'est un patient qui veut voir un médecin
+      else if (req.user.role === 'patient' && user.role === 'doctor') {
+        const { Appointment } = require('../models');
+        
+        const hasAppointment = await Appointment.findOne({
+          where: {
+            doctorId: user.id,
+            patientId: req.user.id
+          }
+        });
+        
+        if (!hasAppointment) {
+          logger.warn(`[USERS] ⛔ Patient tente d'accéder à un médecin sans rendez-vous`);
+          return res.status(403).json({
+            success: false,
+            message: 'Vous n\'avez pas de rendez-vous avec ce médecin'
+          });
+        }
+      }
+      // Autres cas non autorisés
+      else {
+        logger.warn(`[USERS] ⛔ Accès non autorisé`, {
+          requestedBy: req.user.id,
+          requestedUser: id,
+          userRole: req.user.role,
+          targetRole: user.role
+        });
+        return res.status(403).json({
+          success: false,
+          message: 'Accès non autorisé'
+        });
+      }
     }
 
     logger.info(`[USERS] ✅ Utilisateur récupéré: ${id}`);
