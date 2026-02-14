@@ -233,7 +233,7 @@ criticalModels.forEach(modelName => {
 
 console.log('🔍 Modèles chargés dans db:', Object.keys(db));
 
-// ✅ DÉFINIR TOUTES LES ASSOCIATIONS - VERSION CORRIGÉE
+// ✅ DÉFINIR TOUTES LES ASSOCIATIONS
 function setupAssociations() {
   // User ↔ Appointment
   if (db.User && db.Appointment) {
@@ -290,7 +290,7 @@ function setupAssociations() {
     console.log('✅ Associations User-Review');
   }
 
-  // User ↔ AuditLog - AVEC CONTRAINTE DÉSACTIVÉE
+  // User ↔ AuditLog
   if (db.User && db.AuditLog) {
     db.User.hasMany(db.AuditLog, { 
       as: 'auditLogs', 
@@ -311,6 +311,46 @@ function setupAssociations() {
 // Exécuter les associations
 setupAssociations();
 
+// ✅ SUPPRESSION AUTOMATIQUE DE LA CONTRAINTE (OPTION 2)
+async function removeForeignKeyConstraint() {
+  try {
+    console.log('🔍 Vérification des contraintes sur AuditLogs...');
+    
+    // Vérifier si la contrainte existe
+    const constraints = await sequelize.query(
+      `SELECT conname FROM pg_constraint 
+       WHERE conrelid = 'AuditLogs'::regclass 
+       AND conname = 'AuditLogs_userId_fkey'`,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    
+    if (constraints.length > 0) {
+      console.log('🗑️ Suppression de la contrainte AuditLogs_userId_fkey...');
+      
+      // Supprimer la contrainte via queryInterface
+      const queryInterface = sequelize.getQueryInterface();
+      await queryInterface.removeConstraint('AuditLogs', 'AuditLogs_userId_fkey');
+      
+      console.log('✅ Contrainte supprimée avec succès');
+    } else {
+      console.log('✅ La contrainte AuditLogs_userId_fkey n\'existe pas');
+    }
+  } catch (error) {
+    console.log('⚠️ Erreur lors de la suppression de la contrainte (ignorée):', error.message);
+    
+    // Tentative alternative avec SQL direct
+    try {
+      console.log('🔄 Tentative alternative avec SQL direct...');
+      await sequelize.query(
+        `ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey";`
+      );
+      console.log('✅ Contrainte supprimée via SQL direct');
+    } catch (sqlError) {
+      console.log('⚠️ Échec de la suppression SQL (ignoré):', sqlError.message);
+    }
+  }
+}
+
 // ✅ SYNCHRONISATION SANS ALTER
 const syncModels = async () => {
   try {
@@ -320,6 +360,10 @@ const syncModels = async () => {
       logging: false
     });
     console.log('✅ Modèles synchronisés avec la base de données');
+    
+    // Supprimer la contrainte après synchronisation
+    await removeForeignKeyConstraint();
+    
     return true;
   } catch (error) {
     console.error('❌ Erreur synchronisation:', error.message);
@@ -327,6 +371,10 @@ const syncModels = async () => {
     try {
       await sequelize.sync({ force: false, logging: false });
       console.log('✅ Synchronisation mode secours réussie');
+      
+      // Supprimer la contrainte après synchronisation
+      await removeForeignKeyConstraint();
+      
       return true;
     } catch (e) {
       console.error('❌ Échec synchronisation:', e.message);
