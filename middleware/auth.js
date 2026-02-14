@@ -1,36 +1,36 @@
 // middleware/auth.js
-// Middleware d'authentification avec support admin
+// Middleware d'authentification avec support admin et exports compatibles
 
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 
 /**
- * Middleware d'authentification
+ * Middleware principal d'authentification
  * Vérifie le token JWT et attache les infos utilisateur à req.user
- * Gère les admins (qui n'existent pas en base) ET les utilisateurs normaux
+ * Gère les admins (avec isAdmin: true dans le JWT) ET les utilisateurs normaux
  */
-const authMiddleware = async (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
   try {
     console.log('\n🔐 === AUTH MIDDLEWARE ===');
     console.log('📍 Path:', req.path);
     console.log('📋 Method:', req.method);
 
     // 1. Récupérer le token
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers.authorization || req.header('Authorization');
     console.log('🔑 Authorization header présent:', !!authHeader);
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('❌ Token manquant ou format invalide');
+    if (!authHeader) {
+      console.log('❌ Token manquant');
       return res.status(401).json({
         success: false,
-        message: 'Authentification requise - Token manquant'
+        message: 'Token d\'authentification manquant'
       });
     }
 
     const token = authHeader.replace('Bearer ', '');
     console.log('✅ Token extrait (longueur:', token.length, ')');
 
-    // 2. Vérifier et décoder le token
+    // 2. Vérifier et décoder le token JWT
     console.log('🔍 Vérification du token JWT...');
     const decoded = jwt.verify(
       token,
@@ -134,27 +134,27 @@ const authMiddleware = async (req, res, next) => {
 
 /**
  * Middleware pour vérifier les rôles spécifiques
- * Usage : router.get('/admin-only', authMiddleware, requireRole(['admin']), ...)
+ * Usage : router.get('/admin-only', authenticateToken, authorizeRole('admin'), ...)
  */
-const requireRole = (allowedRoles) => {
+const authorizeRole = (...roles) => {
   return (req, res, next) => {
     console.log('\n🔍 === ROLE CHECK ===');
-    console.log('Rôle utilisateur:', req.user.role);
-    console.log('Rôles autorisés:', allowedRoles);
+    console.log('Rôle utilisateur:', req.user?.role);
+    console.log('Rôles autorisés:', roles);
 
     if (!req.user) {
       console.log('❌ Aucun utilisateur dans req.user');
       return res.status(401).json({
         success: false,
-        message: 'Authentification requise'
+        message: 'Non authentifié'
       });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
-      console.log('❌ Rôle non autorisé');
+    if (!roles.includes(req.user.role)) {
+      console.warn(`⛔ Accès refusé: ${req.user.role} tente d'accéder à ${roles.join('/')}`);
       return res.status(403).json({
         success: false,
-        message: 'Accès non autorisé - Permissions insuffisantes'
+        message: 'Accès non autorisé pour votre rôle'
       });
     }
 
@@ -169,9 +169,9 @@ const requireRole = (allowedRoles) => {
  */
 const optionalAuth = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers.authorization || req.header('Authorization');
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!authHeader) {
       return next(); // Pas de token, on continue sans utilisateur
     }
 
@@ -187,14 +187,19 @@ const optionalAuth = async (req, res, next) => {
         id: decoded.userId,
         email: decoded.email,
         role: 'admin',
-        isAdmin: true
+        isAdmin: true,
+        firstName: decoded.firstName || 'Admin',
+        lastName: decoded.lastName || 'User'
       };
       return next();
     }
 
     // Utilisateur normal
-    const user = await User.findByPk(decoded.userId);
-    if (user) {
+    const user = await User.findByPk(decoded.userId, {
+      attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] }
+    });
+    
+    if (user && user.isActive) {
       req.user = user;
     }
 
@@ -205,8 +210,15 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  authMiddleware,
-  requireRole,
-  optionalAuth
+// ✅ EXPORTS COMPATIBLES avec l'ancien middleware
+module.exports = { 
+  authenticateToken,      // Export principal
+  authenticate: authenticateToken,  // Alias
+  auth: authenticateToken,          // Alias
+  authorizeRole,          // Export pour les rôles
+  optionalAuth,           // Export pour auth optionnelle
+  
+  // Exports supplémentaires pour compatibilité
+  authMiddleware: authenticateToken,
+  requireRole: authorizeRole
 };
