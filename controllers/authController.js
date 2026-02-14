@@ -5,7 +5,8 @@ const { logger } = require('../utils/logger');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const { Op } = require('sequelize');
-const { ADMIN_USERS } = require('../config/adminUsers'); // ✅ Ajout de l'import
+const { ADMIN_USERS } = require('../config/adminUsers');
+const { v4: uuidv4 } = require('uuid');
 
 const generateToken = (userId) => {
   return jwt.sign(
@@ -56,7 +57,6 @@ const register = async (req, res) => {
     console.log('🩸 Groupe sanguin:', bloodType);
     console.log('📱 Téléphone:', phoneNumber);
 
-    // ✅ Vérifier si l'email est un email admin
     const isAdminEmail = ADMIN_USERS.some(admin => admin.email === email?.toLowerCase());
     if (isAdminEmail) {
       console.log('❌ Tentative d\'inscription avec email admin:', email);
@@ -107,7 +107,6 @@ const register = async (req, res) => {
         errors.push({ field: 'biography', message: 'Biographie requise pour les médecins' });
       }
       
-      // Gestion des langues
       if (!languages) {
         languages = [];
         console.log('✅ Languages initialisé à []');
@@ -364,7 +363,6 @@ const login = async (req, res) => {
       });
     }
 
-    // ✅ Vérifier d'abord si c'est un admin prédéfini
     console.log('👑 Vérification admin...');
     const adminUser = ADMIN_USERS.find(admin => admin.email === email.toLowerCase());
 
@@ -372,7 +370,6 @@ const login = async (req, res) => {
       console.log('✅ Admin trouvé dans la configuration');
       console.log('Hash stocké:', adminUser.passwordHash);
       
-      // Vérifier le mot de passe avec bcrypt
       const validPassword = await bcrypt.compare(password, adminUser.passwordHash);
       console.log('🔐 Résultat comparaison bcrypt:', validPassword);
 
@@ -386,25 +383,27 @@ const login = async (req, res) => {
 
       console.log('✅ Mot de passe admin valide');
 
-      // Générer un token JWT pour l'admin
+      const adminId = uuidv4();
+      
       const token = jwt.sign(
         { 
-          userId: adminUser.id,
+          userId: adminId,
           email: adminUser.email,
           role: adminUser.role,
-          isAdmin: true
+          isAdmin: true,
+          firstName: adminUser.firstName,
+          lastName: adminUser.lastName
         },
         process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production-2024',
         { expiresIn: '24h' }
       );
 
-      console.log('🔑 Token admin généré');
+      console.log('🔑 Token admin généré avec UUID:', adminId);
 
-      // Log d'audit pour l'admin
       try {
         await AuditLog.create({
           action: 'ADMIN_LOGIN',
-          userId: adminUser.id,
+          userId: adminId,
           ipAddress: req.ip || '127.0.0.1',
           userAgent: req.get('User-Agent'),
           details: { email: adminUser.email }
@@ -425,7 +424,7 @@ const login = async (req, res) => {
         message: 'Connexion réussie',
         data: {
           user: {
-            id: adminUser.id,
+            id: adminId,
             email: adminUser.email,
             firstName: adminUser.firstName,
             lastName: adminUser.lastName,
@@ -440,7 +439,6 @@ const login = async (req, res) => {
       });
     }
 
-    // ✅ Si ce n'est pas un admin, chercher dans la base de données
     console.log('👤 Admin non trouvé, recherche dans la base de données...');
     
     const user = await User.findOne({ 
@@ -742,6 +740,27 @@ const getCurrentUser = async (req, res) => {
   try {
     console.log('\n👤 === GET CURRENT USER CONTROLLER ===');
     console.log('🔍 User ID:', req.user.id);
+    console.log('🔍 User Role:', req.user.role);
+
+    if (req.user.role === 'admin' || req.user.isAdmin) {
+      console.log('✅ Admin authentifié');
+      return res.json({
+        success: true,
+        data: {
+          user: {
+            id: req.user.id,
+            email: req.user.email,
+            firstName: req.user.firstName || 'Admin',
+            lastName: req.user.lastName || 'User',
+            role: 'admin',
+            uniqueCode: 'ADMIN',
+            isVerified: true,
+            isActive: true,
+            profileCompleted: true
+          }
+        }
+      });
+    }
 
     const user = await User.findByPk(req.user.id, {
       attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] }
