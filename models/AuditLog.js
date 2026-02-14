@@ -13,10 +13,13 @@ const AuditLog = sequelize.define('AuditLog', {
   },
   userId: {
     type: DataTypes.UUID,
+    allowNull: true,  // ✅ MODIFIÉ : Permet les valeurs null pour les admins sans compte en base
     references: {
       model: 'Users',
       key: 'id'
-    }
+    },
+    onDelete: 'SET NULL',  // ✅ AJOUTÉ : Si un utilisateur est supprimé, met null au lieu d'échouer
+    onUpdate: 'CASCADE'
   },
   userRole: {
     type: DataTypes.ENUM('patient', 'doctor', 'admin', 'hospital_admin')
