@@ -102,7 +102,7 @@ function createModelDynamically(modelName) {
       ];
       break;
       
-    case 'Notification':  // ✅ CORRIGÉ - VERSION COMPLÈTE
+    case 'Notification':
       attributes = {
         ...attributes,
         userId: { type: DataTypes.UUID, allowNull: false },
@@ -175,11 +175,29 @@ function createModelDynamically(modelName) {
     case 'AuditLog':
       attributes = {
         ...attributes,
-        userId: DataTypes.UUID,
+        userId: { 
+          type: DataTypes.UUID,
+          allowNull: true,
+          references: {
+            model: 'Users',
+            key: 'id'
+          }
+        },
+        userRole: { 
+          type: DataTypes.ENUM('patient', 'doctor', 'admin', 'hospital_admin'),
+          allowNull: true
+        },
         action: { type: DataTypes.STRING, allowNull: false },
         ipAddress: DataTypes.STRING,
         userAgent: DataTypes.TEXT,
-        details: DataTypes.JSONB
+        resource: DataTypes.STRING,
+        resourceId: DataTypes.UUID,
+        details: DataTypes.JSONB,
+        status: { 
+          type: DataTypes.ENUM('success', 'failure'),
+          defaultValue: 'success'
+        },
+        errorMessage: DataTypes.TEXT
       };
       break;
       
@@ -206,7 +224,7 @@ function createModelDynamically(modelName) {
 }
 
 // ✅ VÉRIFIER LES MODÈLES CRITIQUES
-const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment'];
+const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment', 'AuditLog'];
 criticalModels.forEach(modelName => {
   if (!db[modelName]) {
     createModelDynamically(modelName);
@@ -215,7 +233,7 @@ criticalModels.forEach(modelName => {
 
 console.log('🔍 Modèles chargés dans db:', Object.keys(db));
 
-// ✅ DÉFINIR TOUTES LES ASSOCIATIONS
+// ✅ DÉFINIR TOUTES LES ASSOCIATIONS - VERSION CORRIGÉE
 function setupAssociations() {
   // User ↔ Appointment
   if (db.User && db.Appointment) {
@@ -241,16 +259,10 @@ function setupAssociations() {
     console.log('✅ Associations Appointment-Payment');
   }
 
-  // ✅ User ↔ Notification - CORRIGÉ
+  // User ↔ Notification
   if (db.User && db.Notification) {
-    db.User.hasMany(db.Notification, { 
-      as: 'notifications', 
-      foreignKey: 'userId' 
-    });
-    db.Notification.belongsTo(db.User, { 
-      as: 'user', 
-      foreignKey: 'userId' 
-    });
+    db.User.hasMany(db.Notification, { as: 'notifications', foreignKey: 'userId' });
+    db.Notification.belongsTo(db.User, { as: 'user', foreignKey: 'userId' });
     console.log('✅ Associations User-Notification');
   }
 
@@ -278,11 +290,21 @@ function setupAssociations() {
     console.log('✅ Associations User-Review');
   }
 
-  // User ↔ AuditLog
+  // User ↔ AuditLog - AVEC CONTRAINTE DÉSACTIVÉE
   if (db.User && db.AuditLog) {
-    db.User.hasMany(db.AuditLog, { as: 'auditLogs', foreignKey: 'userId' });
-    db.AuditLog.belongsTo(db.User, { as: 'user', foreignKey: 'userId' });
-    console.log('✅ Associations User-AuditLog');
+    db.User.hasMany(db.AuditLog, { 
+      as: 'auditLogs', 
+      foreignKey: 'userId',
+      constraints: false
+    });
+    
+    db.AuditLog.belongsTo(db.User, { 
+      as: 'user', 
+      foreignKey: 'userId',
+      constraints: false
+    });
+    
+    console.log('✅ Associations User-AuditLog (sans contrainte)');
   }
 }
 
