@@ -1,7 +1,29 @@
 const { User, Appointment, Payment, AuditLog, sequelize } = require('../models');
 const { Op } = require('sequelize');
 const bcrypt = require('bcrypt');
-const { validationService } = require('../services/validationService');
+
+// ===== FONCTION UTILITAIRE POUR LOGS D'AUDIT SÉCURISÉS =====
+/**
+ * Crée un log d'audit uniquement si l'utilisateur existe vraiment dans la base
+ * Cela évite l'erreur de clé étrangère pour les admins virtuels
+ */
+async function safeCreateAuditLog(data) {
+  try {
+    // Vérifier si l'utilisateur existe vraiment dans la base
+    const userExists = await User.findByPk(data.userId);
+    if (!userExists) {
+      console.log(`⏭️ Log d'audit ignoré: utilisateur ${data.userId} non trouvé en base`);
+      return null;
+    }
+    
+    // Si l'utilisateur existe, créer le log
+    return await AuditLog.create(data);
+  } catch (error) {
+    console.warn('⚠️ Erreur non-bloquante création audit log:', error.message);
+    return null;
+  }
+}
+// ========================================================
 
 const adminController = {
   async getDashboardStats(req, res) {
@@ -143,7 +165,8 @@ const adminController = {
         order: [[sortBy, sortOrder]]
       });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_VIEW_USERS',
         userId: req.user.id,
         ipAddress: req.ip,
@@ -198,7 +221,8 @@ const adminController = {
       userData.patientAppointments = patientAppointments;
       userData.doctorAppointments = doctorAppointments;
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_VIEW_USER',
         userId: req.user.id,
         ipAddress: req.ip,
@@ -240,13 +264,14 @@ const adminController = {
         uniqueCode: userData.role === 'patient' ? 'PAT-' + Date.now() : 'DOC-' + Date.now()
       }, { transaction });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_CREATE_USER',
         userId: req.user.id,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
         details: { createdUserId: user.id, role: user.role, email: user.email }
-      }, { transaction });
+      });
 
       await transaction.commit();
       res.status(201).json({ success: true, data: user, message: 'Utilisateur créé avec succès' });
@@ -285,13 +310,14 @@ const adminController = {
 
       await user.update(userData, { transaction });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_UPDATE_USER',
         userId: req.user.id,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
         details: { targetUserId: id, updatedFields: Object.keys(userData) }
-      }, { transaction });
+      });
 
       await transaction.commit();
       res.json({ success: true, data: user, message: 'Utilisateur mis à jour avec succès' });
@@ -322,13 +348,14 @@ const adminController = {
       await Appointment.destroy({ where: { [Op.or]: [{ patientId: id }, { doctorId: id }] }, transaction });
       await Payment.destroy({ where: { userId: id }, transaction });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_DELETE_USER',
         userId: req.user.id,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
         details: { deletedUserId: id, role: user.role, email: user.email }
-      }, { transaction });
+      });
 
       await user.destroy({ transaction });
       await transaction.commit();
@@ -362,13 +389,14 @@ const adminController = {
 
       await user.update({ isActive: !user.isActive }, { transaction });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_TOGGLE_USER_STATUS',
         userId: req.user.id,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
         details: { targetUserId: id, newStatus: user.isActive }
-      }, { transaction });
+      });
 
       await transaction.commit();
       res.json({ success: true, data: user, message: `Utilisateur ${user.isActive ? 'activé' : 'désactivé'} avec succès` });
@@ -409,7 +437,8 @@ const adminController = {
         order: [['appointmentDate', 'DESC']]
       });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_VIEW_APPOINTMENTS',
         userId: req.user.id,
         ipAddress: req.ip,
@@ -449,7 +478,8 @@ const adminController = {
         return res.status(404).json({ success: false, message: 'Rendez-vous non trouvé' });
       }
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_VIEW_APPOINTMENT',
         userId: req.user.id,
         ipAddress: req.ip,
@@ -478,13 +508,14 @@ const adminController = {
 
       await Payment.destroy({ where: { appointmentId: id }, transaction });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_DELETE_APPOINTMENT',
         userId: req.user.id,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
         details: { appointmentId: id, patientId: appointment.patientId, doctorId: appointment.doctorId }
-      }, { transaction });
+      });
 
       await appointment.destroy({ transaction });
       await transaction.commit();
@@ -544,7 +575,8 @@ const adminController = {
         stat.average = stat.total / stat.count;
       });
 
-      await AuditLog.create({
+      // ✅ LOG PROTÉGÉ
+      await safeCreateAuditLog({
         action: 'ADMIN_VIEW_FINANCIAL_REPORTS',
         userId: req.user.id,
         ipAddress: req.ip,
