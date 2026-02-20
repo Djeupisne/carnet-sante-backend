@@ -347,7 +347,160 @@ app.get('/api/test-availability/:doctorId', async (req, res) => {
     });
   }
 });
+// ========== ROUTES DE DEBUG ==========
+// Route pour voir la structure de la table User
+app.get('/api/debug/user-structure', async (req, res) => {
+  try {
+    const { User } = require('./models');
+    
+    console.log('🔍 Debug: Récupération de la structure de User...');
+    
+    // Méthode 1: Décrire la table
+    const tableDescription = await User.describe();
+    
+    // Méthode 2: Récupérer un utilisateur exemple
+    const sampleUser = await User.findOne({
+      attributes: { exclude: [] } // Tous les champs
+    });
+    
+    const sampleUserFields = sampleUser ? Object.keys(sampleUser.toJSON()) : [];
+    
+    // Méthode 3: Attributs du modèle
+    const modelAttributes = Object.keys(User.rawAttributes);
+    
+    res.json({
+      success: true,
+      modelAttributes,
+      tableColumns: Object.keys(tableDescription),
+      sampleUserFields,
+      count: await User.count()
+    });
+  } catch (error) {
+    console.error('❌ Erreur debug user-structure:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
 
+// Route pour tester un findAll simple
+app.get('/api/debug/test-users', async (req, res) => {
+  try {
+    const { User } = require('./models');
+    
+    console.log('🔍 Test findAll simple sur User...');
+    
+    // Test 1: Sans aucun paramètre
+    const users1 = await User.findAll({
+      limit: 5
+    });
+    
+    // Test 2: Avec un champ spécifique
+    const users2 = await User.findAll({
+      attributes: ['id', 'email', 'firstName', 'lastName', 'role'],
+      limit: 5
+    });
+    
+    res.json({
+      success: true,
+      test1: {
+        count: users1.length,
+        sample: users1.length > 0 ? Object.keys(users1[0].toJSON()) : []
+      },
+      test2: {
+        count: users2.length,
+        sample: users2.length > 0 ? users2[0] : null
+      }
+    });
+  } catch (error) {
+    console.error('❌ Erreur test-users:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+
+// Route pour tester avec les filtres admin
+app.get('/api/debug/admin-users-test', async (req, res) => {
+  try {
+    const { User, AuditLog } = require('./models');
+    const { Op } = require('sequelize');
+    
+    console.log('🔍 Test avec les mêmes paramètres que admin...');
+    
+    // Simuler les paramètres de getUsers
+    const role = req.query.role;
+    const isActive = req.query.isActive;
+    const search = req.query.search;
+    
+    const whereClause = {};
+    if (role) whereClause.role = role;
+    if (isActive !== undefined) whereClause.isActive = isActive === 'true';
+    
+    if (search) {
+      whereClause[Op.or] = [
+        { firstName: { [Op.iLike]: `%${search}%` } },
+        { lastName: { [Op.iLike]: `%${search}%` } },
+        { email: { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+    
+    console.log('Where clause:', whereClause);
+    
+    // Test avec exclude
+    try {
+      const usersWithExclude = await User.findAll({
+        where: whereClause,
+        attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] },
+        limit: 5
+      });
+      
+      console.log(`✅ Avec exclude: ${usersWithExclude.length} utilisateurs`);
+      
+      res.json({
+        success: true,
+        withExclude: {
+          count: usersWithExclude.length,
+          sample: usersWithExclude.length > 0 ? usersWithExclude[0] : null
+        },
+        whereClause
+      });
+    } catch (excludeError) {
+      console.error('❌ Erreur avec exclude:', excludeError);
+      
+      // Fallback sans exclude
+      const usersWithoutExclude = await User.findAll({
+        where: whereClause,
+        limit: 5
+      });
+      
+      res.json({
+        success: true,
+        withExclude: {
+          error: excludeError.message,
+          name: excludeError.name
+        },
+        withoutExclude: {
+          count: usersWithoutExclude.length,
+          sample: usersWithoutExclude.length > 0 ? usersWithoutExclude[0] : null
+        },
+        whereClause
+      });
+    }
+  } catch (error) {
+    console.error('❌ Erreur admin-users-test:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      stack: error.stack 
+    });
+  }
+});
+// ========== FIN ROUTES DE DEBUG ==========
 // Gestion des routes non trouvées
 app.use(notFound);
 
