@@ -1,209 +1,411 @@
-const { Notification, User } = require('../models'); // ✅ AJOUT DE User ICI !
+const { Notification, NotificationLog, User, Appointment } = require('../models');
 const emailService = require('./emailService');
 const smsService = require('./smsService');
+const { Op } = require('sequelize');
 
 class NotificationService {
+  constructor() {
+    this.scheduledJobs = new Map();
+  }
+
   /**
-   * ✅ Créer une notification
+   * Créer et envoyer une notification
    */
-  async createNotification(notificationData) {
+  async sendNotification({
+    userId,
+    type,
+    channel = 'in_app',
+    title,
+    message,
+    data = {},
+    priority = 'medium',
+    appointmentId = null
+  }) {
     try {
-      console.log(`📧 Création de notification:`, notificationData);
-      
+      console.log(`📧 Création de notification pour utilisateur ${userId}`, { type, channel });
+
+      // Récupérer l'utilisateur
+      const user = await User.findByPk(userId);
+      if (!user) {
+        throw new Error('Utilisateur non trouvé');
+      }
+
+      // 1. Créer la notification en base
       const notification = await Notification.create({
-        ...notificationData,
+        userId,
+        type,
+        channel,
+        title,
+        message,
+        data,
+        priority,
         isRead: false,
+        isDelivered: false
+      });
+
+      // 2. Envoyer selon le canal choisi
+      let emailResult = null;
+      let smsResult = null;
+
+      // Envoi par email
+      if (channel === 'email' || channel === 'both') {
+        if (user.email) {
+          emailResult = await emailService.sendTemplate(type, data, user.email);
+        }
+      }
+
+      // Envoi par SMS
+      if (channel === 'sms' || channel === 'both') {
+        if (user.phoneNumber) {
+          smsResult = await smsService.sendTemplate(type, data, user.phoneNumber);
+        }
+      }
+
+      // 3. Mettre à jour le statut
+      await notification.update({
+        isDelivered: true,
         sentAt: new Date()
       });
-      
-      // ✅ NE PAS BLOQUER - Lancer en arrière-plan sans await
-      this.sendRealTimeNotification(notification).catch(err => {
-        console.warn('⚠️ Erreur envoi temps réel (non bloquant):', err.message);
-      });
-      
-      console.log(`✅ Notification créée: ${notification.id}`);
-      return notification;
-    } catch (error) {
-      console.error('❌ Erreur création notification:', error);
-      throw error;
-    }
-  }
 
-  /**
-   * ✅ Envoyer notification en temps réel
-   */
-  async sendRealTimeNotification(notification) {
-    try {
-      // ✅ Exemple avec Socket.io
-      if (global.io) {
-        global.io.to(`user_${notification.userId}`).emit('notification', {
-          id: notification.id,
-          type: notification.type,
-          title: notification.title,
-          message: notification.message,
-          data: notification.data,
-          createdAt: notification.createdAt
-        });
-        console.log(`📱 Notification temps réel envoyée à user_${notification.userId}`);
-      }
-
-      // ✅ Envoyer par email pour les notifications importantes
-      if (notification.priority === 'high' || notification.priority === 'urgent') {
-        await this.sendEmailNotification(notification).catch(err => {
-          console.warn('⚠️ Erreur email (non bloquant):', err.message);
-        });
-      }
-
-      // ✅ Envoyer par SMS pour les notifications urgentes
-      if (notification.priority === 'urgent') {
-        await this.sendSMSNotification(notification).catch(err => {
-          console.warn('⚠️ Erreur SMS (non bloquant):', err.message);
-        });
-      }
-    } catch (error) {
-      console.error('❌ Erreur envoi notification temps réel:', error.message);
-      // ✅ NE PAS PROPAGER L'ERREUR
-    }
-  }
-
-  /**
-   * ✅ Envoyer notification par email
-   */
-  async sendEmailNotification(notification) {
-    try {
-      const user = await User.findByPk(notification.userId);
-      
-      if (user?.email) {
-        await emailService.sendTemplateEmail({
-          to: user.email,
-          subject: notification.title,
-          template: 'notification',
-          data: {
-            title: notification.title,
-            message: notification.message,
-            user: {
-              firstName: user.firstName || '',
-              lastName: user.lastName || ''
-            }
-          }
-        });
-        console.log(`📧 Email envoyé à ${user.email}`);
-      }
-    } catch (error) {
-      console.error('❌ Erreur email:', error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * ✅ Envoyer notification par SMS
-   */
-  async sendSMSNotification(notification) {
-    try {
-      const user = await User.findByPk(notification.userId);
-      
-      if (user?.phoneNumber) {
-        await smsService.sendSMS({
-          to: user.phoneNumber,
-          message: `${notification.title}: ${notification.message}`
-        });
-        console.log(`📱 SMS envoyé à ${user.phoneNumber}`);
-      }
-    } catch (error) {
-      console.error('❌ Erreur SMS:', error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * ✅ Marquer une notification comme lue
-   */
-  async markAsRead(notificationId, userId) {
-    try {
-      const notification = await Notification.findOne({
-        where: { id: notificationId, userId }
+      // 4. Logguer l'envoi
+      await this.logNotification({
+        notificationId: notification.id,
+        appointmentId,
+        userId,
+        channel,
+        recipient: channel === 'email' ? user.email : user.phoneNumber,
+        type,
+        status: 'sent',
+        provider: channel === 'email' ? 'SMTP' : 'Twilio',
+        providerId: emailResult?.messageId || smsResult?.messageId
       });
 
-      if (!notification) {
-        throw new Error('Notification non trouvée');
-      }
-
-      await notification.update({ isRead: true });
-      console.log(`✅ Notification ${notificationId} marquée comme lue`);
+      console.log(`✅ Notification envoyée à ${user.email || user.phoneNumber}`);
       return notification;
+
     } catch (error) {
-      console.error('❌ Erreur marquage notification:', error);
+      console.error('❌ Erreur envoi notification:', error);
+
+      // Logguer l'échec
+      await this.logNotification({
+        userId,
+        appointmentId,
+        channel,
+        type,
+        status: 'failed',
+        error: error.message
+      }).catch(e => console.error('Erreur log:', e));
+
       throw error;
     }
   }
 
   /**
-   * ✅ Récupérer les notifications d'un utilisateur
+   * Envoyer une confirmation de rendez-vous
+   */
+  async sendAppointmentConfirmation(appointment) {
+    try {
+      const fullAppointment = await Appointment.findByPk(appointment.id, {
+        include: [
+          { model: User, as: 'patient' },
+          { model: User, as: 'doctor' }
+        ]
+      });
+
+      if (!fullAppointment) return;
+
+      const { patient, doctor } = fullAppointment;
+
+      // Notification au patient
+      await this.sendNotification({
+        userId: patient.id,
+        type: 'appointment_confirmation',
+        channel: 'both',
+        title: '✅ Rendez-vous confirmé',
+        message: `Votre rendez-vous avec Dr. ${doctor.lastName} le ${new Date(fullAppointment.appointmentDate).toLocaleDateString('fr-FR')} a été confirmé.`,
+        data: { appointment: fullAppointment },
+        priority: 'high',
+        appointmentId: fullAppointment.id
+      });
+
+      // Notification au médecin
+      await this.sendNotification({
+        userId: doctor.id,
+        type: 'appointment_confirmation',
+        channel: 'email',
+        title: '✅ Nouveau rendez-vous confirmé',
+        message: `Rendez-vous confirmé avec ${patient.firstName} ${patient.lastName}`,
+        data: { appointment: fullAppointment },
+        priority: 'medium',
+        appointmentId: fullAppointment.id
+      });
+
+    } catch (error) {
+      console.error('❌ Erreur envoi confirmation:', error);
+    }
+  }
+
+  /**
+   * Envoyer un rappel de rendez-vous
+   */
+  async sendAppointmentReminder(appointment, hoursBefore) {
+    try {
+      const fullAppointment = await Appointment.findByPk(appointment.id, {
+        include: [
+          { model: User, as: 'patient' },
+          { model: User, as: 'doctor' }
+        ]
+      });
+
+      if (!fullAppointment) return;
+
+      const { patient, doctor } = fullAppointment;
+      const type = hoursBefore === 24 ? 'appointment_reminder_24h' : 'appointment_reminder_1h';
+      const title = hoursBefore === 24 ? '⏰ Rappel: Rendez-vous demain' : '⚠️ Rappel urgent: Rendez-vous dans 1 heure';
+
+      // Notification au patient
+      await this.sendNotification({
+        userId: patient.id,
+        type,
+        channel: 'both',
+        title,
+        message: hoursBefore === 24 
+          ? `Rappel: Vous avez rendez-vous avec Dr. ${doctor.lastName} demain.`
+          : `Rappel urgent: Votre rendez-vous avec Dr. ${doctor.lastName} est dans 1 heure.`,
+        data: { appointment: fullAppointment, hoursBefore },
+        priority: hoursBefore === 1 ? 'urgent' : 'high',
+        appointmentId: fullAppointment.id
+      });
+
+      // Notification au médecin (email uniquement)
+      await this.sendNotification({
+        userId: doctor.id,
+        type,
+        channel: 'email',
+        title,
+        message: hoursBefore === 24
+          ? `Rappel: Rendez-vous avec ${patient.firstName} ${patient.lastName} demain.`
+          : `Rappel: Rendez-vous avec ${patient.firstName} ${patient.lastName} dans 1 heure.`,
+        data: { appointment: fullAppointment, hoursBefore },
+        priority: 'medium',
+        appointmentId: fullAppointment.id
+      });
+
+    } catch (error) {
+      console.error('❌ Erreur envoi rappel:', error);
+    }
+  }
+
+  /**
+   * Envoyer une annulation de rendez-vous
+   */
+  async sendAppointmentCancellation(appointment, cancelledBy) {
+    try {
+      const fullAppointment = await Appointment.findByPk(appointment.id, {
+        include: [
+          { model: User, as: 'patient' },
+          { model: User, as: 'doctor' }
+        ]
+      });
+
+      if (!fullAppointment) return;
+
+      const { patient, doctor } = fullAppointment;
+
+      // Notification au patient
+      await this.sendNotification({
+        userId: patient.id,
+        type: 'appointment_cancellation',
+        channel: 'both',
+        title: '❌ Rendez-vous annulé',
+        message: `Votre rendez-vous avec Dr. ${doctor.lastName} a été annulé.`,
+        data: { 
+          appointment: fullAppointment,
+          cancelledBy,
+          reason: appointment.cancellationReason 
+        },
+        priority: 'high',
+        appointmentId: fullAppointment.id
+      });
+
+      // Notification au médecin
+      await this.sendNotification({
+        userId: doctor.id,
+        type: 'appointment_cancellation',
+        channel: 'email',
+        title: '❌ Rendez-vous annulé',
+        message: `Rendez-vous avec ${patient.firstName} ${patient.lastName} annulé.`,
+        data: { 
+          appointment: fullAppointment,
+          cancelledBy,
+          reason: appointment.cancellationReason 
+        },
+        priority: 'medium',
+        appointmentId: fullAppointment.id
+      });
+
+    } catch (error) {
+      console.error('❌ Erreur envoi annulation:', error);
+    }
+  }
+
+  /**
+   * Envoyer un email de bienvenue
+   */
+  async sendWelcomeEmail(user) {
+    try {
+      await this.sendNotification({
+        userId: user.id,
+        type: 'welcome',
+        channel: 'email',
+        title: `Bienvenue sur Carnet Santé, ${user.firstName}!`,
+        message: 'Votre compte a été créé avec succès.',
+        data: { user },
+        priority: 'medium'
+      });
+    } catch (error) {
+      console.error('❌ Erreur envoi welcome:', error);
+    }
+  }
+
+  /**
+   * Récupérer les notifications d'un utilisateur
    */
   async getUserNotifications(userId, options = {}) {
-    try {
-      const { page = 1, limit = 20, unreadOnly = false } = options;
-      const offset = (page - 1) * limit;
+    const { page = 1, limit = 20, unreadOnly = false } = options;
+    const offset = (page - 1) * limit;
 
-      const whereClause = { userId };
-      if (unreadOnly) {
-        whereClause.isRead = false;
-      }
+    const whereClause = { userId };
+    if (unreadOnly) whereClause.isRead = false;
 
-      const { count, rows: notifications } = await Notification.findAndCountAll({
-        where: whereClause,
-        order: [['createdAt', 'DESC']],
-        limit: parseInt(limit),
-        offset: parseInt(offset)
-      });
+    const { count, rows } = await Notification.findAndCountAll({
+      where: whereClause,
+      order: [['createdAt', 'DESC']],
+      limit,
+      offset
+    });
 
-      console.log(`📋 ${notifications.length} notifications récupérées pour l'utilisateur ${userId}`);
-      return {
-        notifications,
-        pagination: {
-          current: parseInt(page),
-          total: Math.ceil(count / limit),
-          totalRecords: count
-        }
-      };
-    } catch (error) {
-      console.error('❌ Erreur récupération notifications:', error);
-      throw error;
-    }
+    return {
+      notifications: rows,
+      pagination: {
+        current: page,
+        total: Math.ceil(count / limit),
+        totalRecords: count
+      },
+      unreadCount: await this.getUnreadCount(userId)
+    };
   }
 
   /**
-   * ✅ Marquer toutes les notifications comme lues
+   * Marquer une notification comme lue
+   */
+  async markAsRead(notificationId, userId) {
+    const notification = await Notification.findOne({
+      where: { id: notificationId, userId }
+    });
+
+    if (!notification) {
+      throw new Error('Notification non trouvée');
+    }
+
+    await notification.update({ isRead: true });
+    return notification;
+  }
+
+  /**
+   * Marquer toutes les notifications comme lues
    */
   async markAllAsRead(userId) {
+    await Notification.update(
+      { isRead: true },
+      { where: { userId, isRead: false } }
+    );
+    return true;
+  }
+
+  /**
+   * Compter les notifications non lues
+   */
+  async getUnreadCount(userId) {
+    return await Notification.count({
+      where: { userId, isRead: false }
+    });
+  }
+
+  /**
+   * Supprimer les anciennes notifications
+   */
+  async cleanupOldNotifications(daysOld = 30) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+
+    await Notification.destroy({
+      where: {
+        createdAt: { [Op.lt]: cutoffDate },
+        isRead: true
+      }
+    });
+  }
+
+  /**
+   * Logger une notification
+   */
+  async logNotification(data) {
     try {
-      await Notification.update(
-        { isRead: true },
-        { where: { userId, isRead: false } }
-      );
-      console.log(`✅ Toutes les notifications de ${userId} marquées comme lues`);
-      return true;
+      return await NotificationLog.create({
+        notificationId: data.notificationId,
+        appointmentId: data.appointmentId,
+        userId: data.userId,
+        channel: data.channel,
+        recipient: data.recipient,
+        type: data.type,
+        status: data.status,
+        provider: data.provider,
+        providerId: data.providerId,
+        error: data.error,
+        sentAt: data.status === 'sent' ? new Date() : null
+      });
     } catch (error) {
-      console.error('❌ Erreur marquage toutes notifications:', error);
-      throw error;
+      console.error('❌ Erreur création log:', error);
     }
   }
 
   /**
-   * ✅ Compter les notifications non lues
+   * Obtenir les statistiques des notifications
    */
-  async getUnreadCount(userId) {
-    try {
-      const count = await Notification.count({
-        where: { userId, isRead: false }
-      });
-      return count;
-    } catch (error) {
-      console.error('❌ Erreur comptage notifications:', error);
-      throw error;
-    }
+  async getStats(userId = null) {
+    const whereClause = userId ? { userId } : {};
+
+    const total = await Notification.count(whereClause);
+    const unread = await Notification.count({ ...whereClause, isRead: false });
+    const delivered = await Notification.count({ ...whereClause, isDelivered: true });
+
+    return {
+      total,
+      unread,
+      delivered,
+      byType: await this.getCountByType(whereClause),
+      byChannel: await this.getCountByChannel(whereClause)
+    };
+  }
+
+  async getCountByType(whereClause) {
+    const types = await Notification.findAll({
+      where: whereClause,
+      attributes: ['type', [sequelize.fn('COUNT', sequelize.col('type')), 'count']],
+      group: ['type']
+    });
+    return types.reduce((acc, t) => ({ ...acc, [t.type]: parseInt(t.dataValues.count) }), {});
+  }
+
+  async getCountByChannel(whereClause) {
+    const channels = await Notification.findAll({
+      where: whereClause,
+      attributes: ['channel', [sequelize.fn('COUNT', sequelize.col('channel')), 'count']],
+      group: ['channel']
+    });
+    return channels.reduce((acc, c) => ({ ...acc, [c.channel]: parseInt(c.dataValues.count) }), {});
   }
 }
 
-// ✅ EXPORT DE L'INSTANCE UNIQUE
 module.exports = new NotificationService();
