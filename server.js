@@ -183,7 +183,7 @@ app.use('/api/appointments', require('./routes/appointment'));
 app.use('/api/payments', require('./routes/payment'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/search', require('./routes/search'));
-app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/notifications', require('./routes/notifications')); // ✅ Route notifications
 app.use('/api/calendars', require('./routes/calendar'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/doctors', require('./routes/doctors'));
@@ -398,6 +398,23 @@ const startServer = async () => {
       
       console.log('✅ Modèles principaux synchronisés');
       
+      // ✅ Synchronisation des nouveaux modèles de notification
+      try {
+        const { Notification, NotificationLog } = require('./models');
+        
+        if (Notification) {
+          await Notification.sync({ alter: false, force: false });
+          console.log('✅ Modèle Notification synchronisé');
+        }
+        
+        if (NotificationLog) {
+          await NotificationLog.sync({ alter: false, force: false });
+          console.log('✅ Modèle NotificationLog synchronisé');
+        }
+      } catch (notifError) {
+        console.error('❌ Erreur synchronisation modèles notification:', notifError.message);
+      }
+      
       // ✅ CORRIGÉ: Calendar est DÉJÀ dans db via models/index.js
       try {
         // ✅ Importer depuis ./models, PAS depuis ./models/calendar
@@ -453,6 +470,15 @@ const startServer = async () => {
       }
       
       console.log('✅ Tous les modèles sont prêts');
+      
+      // ✅ Démarrer le planificateur de rappels
+      try {
+        const reminderScheduler = require('./jobs/reminderScheduler');
+        reminderScheduler.start();
+        console.log('✅ Planificateur de rappels démarré');
+      } catch (schedulerError) {
+        console.error('❌ Erreur démarrage planificateur:', schedulerError.message);
+      }
     }
   } catch (error) {
     console.error('❌ ERREUR lors du démarrage:', error);
@@ -462,12 +488,26 @@ const startServer = async () => {
 // Gestion gracieuse de l'arrêt
 process.on('SIGTERM', async () => {
   console.log('\n🛑 Arrêt gracieux du serveur...');
+  
+  // Arrêter le planificateur
+  try {
+    const reminderScheduler = require('./jobs/reminderScheduler');
+    reminderScheduler.stop();
+  } catch (e) {}
+  
   await sequelize.close();
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('\n🛑 Arrêt gracieux (Ctrl+C)...');
+  
+  // Arrêter le planificateur
+  try {
+    const reminderScheduler = require('./jobs/reminderScheduler');
+    reminderScheduler.stop();
+  } catch (e) {}
+  
   await sequelize.close();
   process.exit(0);
 });
