@@ -347,7 +347,8 @@ app.get('/api/test-availability/:doctorId', async (req, res) => {
     });
   }
 });
-// ========== ROUTES DE DEBUG ==========
+
+// ========== ROUTES DE DEBUG EXISTANTES ==========
 // Route pour voir la structure de la table User
 app.get('/api/debug/user-structure', async (req, res) => {
   try {
@@ -500,7 +501,196 @@ app.get('/api/debug/admin-users-test', async (req, res) => {
     });
   }
 });
-// ========== FIN ROUTES DE DEBUG ==========
+
+// ========== NOUVELLES ROUTES DE DEBUG EMAIL ==========
+// Route pour vérifier le statut du service email
+app.get('/api/debug/email-status', async (req, res) => {
+  try {
+    console.log('\n📧 Vérification du statut du service email...');
+    
+    const emailService = require('./services/emailService');
+    
+    // Récupérer l'état du service
+    const status = {
+      isEnabled: emailService.isEnabled,
+      hasTransporter: !!emailService.transporter,
+      smtpConfig: {
+        host: process.env.SMTP_HOST ? '✅ présent' : '❌ manquant',
+        port: process.env.SMTP_PORT ? '✅ présent' : '❌ manquant',
+        user: process.env.SMTP_USER ? '✅ présent' : '❌ manquant',
+        pass: process.env.SMTP_PASS ? '✅ présent (cache)' : '❌ manquant',
+        secure: process.env.SMTP_SECURE || 'false'
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log('📧 Statut service:', status);
+    
+    res.json({
+      success: true,
+      data: status
+    });
+  } catch (error) {
+    console.error('❌ Erreur vérification email-status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
+// Route pour tester l'envoi d'email
+app.get('/api/debug/email-test/:email', async (req, res) => {
+  try {
+    console.log('\n📧 ===== TEST EMAIL MANUEL =====');
+    console.log('📧 Destinataire:', req.params.email);
+    console.log('📧 Timestamp:', new Date().toISOString());
+    
+    const emailService = require('./services/emailService');
+    
+    // Vérifier l'état du service
+    const serviceStatus = {
+      isEnabled: emailService.isEnabled,
+      hasTransporter: !!emailService.transporter,
+      smtpConfig: {
+        host: process.env.SMTP_HOST ? '✓' : '✗',
+        port: process.env.SMTP_PORT ? '✓' : '✗',
+        user: process.env.SMTP_USER ? '✓' : '✗',
+        pass: process.env.SMTP_PASS ? '✓' : '✗',
+      }
+    };
+    
+    console.log('📧 Statut service avant envoi:', serviceStatus);
+    
+    // Tenter d'envoyer un email
+    const result = await emailService.sendEmail({
+      to: req.params.email,
+      subject: '🔧 Test Carnet Santé - Debug Email',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .success { color: #10b981; font-weight: bold; }
+            .info { background: #e0f2fe; padding: 15px; border-radius: 5px; margin: 20px 0; }
+            .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Carnet Santé</h1>
+              <p>Test de configuration email</p>
+            </div>
+            <div class="content">
+              <h2 class="success">✅ Test réussi !</h2>
+              <p>Si vous recevez cet email, votre service SMTP fonctionne correctement.</p>
+              
+              <div class="info">
+                <h3>Informations de test :</h3>
+                <p><strong>Timestamp:</strong> ${new Date().toISOString()}</p>
+                <p><strong>Serveur SMTP:</strong> ${process.env.SMTP_HOST}</p>
+                <p><strong>Utilisateur:</strong> ${process.env.SMTP_USER}</p>
+                <p><strong>Port:</strong> ${process.env.SMTP_PORT}</p>
+                <p><strong>Secure:</strong> ${process.env.SMTP_SECURE}</p>
+              </div>
+              
+              <p>Votre système de notifications est maintenant opérationnel !</p>
+              <p>Les emails suivants seront automatiquement envoyés :</p>
+              <ul>
+                <li>✅ Email de bienvenue à l'inscription</li>
+                <li>✅ Confirmation de rendez-vous</li>
+                <li>✅ Rappels 24h et 1h avant le rendez-vous</li>
+                <li>✅ Notifications d'annulation</li>
+              </ul>
+            </div>
+            <div class="footer">
+              <p>Cet email a été envoyé automatiquement depuis Carnet Santé.</p>
+              <p>© ${new Date().getFullYear()} Carnet Santé. Tous droits réservés.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Test Carnet Santé - Debug Email\n\nSi vous recevez cet email, votre service SMTP fonctionne correctement.\n\nTimestamp: ${new Date().toISOString()}\nServeur: ${process.env.SMTP_HOST}`
+    });
+    
+    console.log('📧 Résultat envoi:', result);
+    
+    res.json({
+      success: true,
+      serviceStatus,
+      sendResult: result,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur test email:');
+    console.error('  - Message:', error.message);
+    console.error('  - Stack:', error.stack);
+    
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Route pour tester l'envoi d'un email de bienvenue simulé
+app.post('/api/debug/test-welcome-email', async (req, res) => {
+  try {
+    const { email, firstName, lastName, role } = req.body;
+    
+    if (!email || !firstName || !lastName || !role) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email, prénom, nom et rôle requis'
+      });
+    }
+    
+    console.log('\n📧 ===== TEST EMAIL DE BIENVENUE =====');
+    console.log('📧 Destinataire:', email);
+    console.log('📧 Utilisateur:', { firstName, lastName, role });
+    
+    const notificationService = require('./services/notificationService');
+    
+    // Créer un utilisateur factice pour le test
+    const mockUser = {
+      id: 'test-' + Date.now(),
+      email,
+      firstName,
+      lastName,
+      role,
+      uniqueCode: role === 'doctor' ? 'DOC-TEST-123' : 'PAT-TEST-123'
+    };
+    
+    const result = await notificationService.sendWelcomeEmail(mockUser);
+    
+    res.json({
+      success: true,
+      message: 'Email de bienvenue test envoyé',
+      result,
+      user: mockUser
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur test welcome email:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+// ========== FIN ROUTES DE DEBUG EMAIL ==========
+
 // Gestion des routes non trouvées
 app.use(notFound);
 
@@ -522,6 +712,8 @@ const startServer = async () => {
       console.log(`🌐 URL réseau: http://0.0.0.0:${PORT}`);
       console.log(`❤️  Health check: http://localhost:${PORT}/health`);
       console.log(`🔧 Test CORS: http://localhost:${PORT}/api/cors-test`);
+      console.log(`📧 Test Email: http://localhost:${PORT}/api/debug/email-status`);
+      console.log(`📧 Test Envoi: http://localhost:${PORT}/api/debug/email-test/votre@email.com`);
       console.log(`🛡️  Trust proxy: ✅ Configuré (array)`);
       console.log(`🔍 Debug middleware: ✅ Activé pour /api/auth/register`);
       console.log('\n📍 URLs autorisées CORS:');
