@@ -20,6 +20,88 @@ function generateUniqueCode(role) {
   return `${prefix}${timestamp}${random}`.toUpperCase();
 }
 
+/**
+ * Prix de base par spécialité (à partir de 25€)
+ */
+const SPECIALTY_PRICES = {
+  'Généraliste': 25,
+  'Médecine générale': 25,
+  'Cardiologie': 45,
+  'Dermatologie': 40,
+  'Neurologie': 55,
+  'Pédiatrie': 35,
+  'Gynécologie': 40,
+  'Ophtalmologie': 45,
+  'ORL': 35,
+  'Psychiatrie': 50,
+  'Psychologue': 45,
+  'Dentiste': 35,
+  'Chirurgien': 60,
+  'Radiologue': 50,
+  'Anesthésiste': 55,
+  'Urgentiste': 40,
+  'Rhumatologue': 45,
+  'Endocrinologue': 45,
+  'Gastro-entérologue': 45,
+  'Urologue': 45,
+  'Néphrologue': 45,
+  'Pneumologue': 45,
+  'Hématologue': 45,
+  'Oncologue': 55,
+  'Médecin du sport': 35,
+  'Nutritionniste': 30,
+  'Kinésithérapeute': 30,
+  'Orthophoniste': 30,
+  'Podologue': 30,
+  'Ostéopathe': 40,
+  'Acupuncteur': 35,
+  'Homéopathe': 30,
+  'Médecin esthétique': 50,
+  'Médecin du travail': 35,
+  'Médecin scolaire': 30,
+  'Médecin légiste': 45,
+  'Allergologue': 40,
+  'Immunologue': 45,
+  'Infectiologue': 45,
+  'Médecin interniste': 45,
+  'Gériatre': 40,
+  'Médecin palliatif': 40,
+  'Médecin de la douleur': 45,
+  'Médecin du sommeil': 45,
+  'Médecin vasculaire': 45,
+  'Médecin nucléaire': 55,
+  'Généticien': 55,
+  'Pharmacologue': 45,
+  'Médecin tropical': 40,
+  'Médecin militaire': 35
+};
+
+/**
+ * Fonction pour obtenir le prix en fonction de la spécialité
+ */
+function getPriceForSpecialty(specialty) {
+  if (!specialty) return 25; // Prix minimum par défaut
+  
+  // Nettoyer la spécialité (enlever les espaces, normaliser)
+  const cleanSpecialty = specialty.trim();
+  
+  // Chercher une correspondance exacte
+  if (SPECIALTY_PRICES[cleanSpecialty]) {
+    return SPECIALTY_PRICES[cleanSpecialty];
+  }
+  
+  // Chercher une correspondance partielle
+  for (const [key, price] of Object.entries(SPECIALTY_PRICES)) {
+    if (cleanSpecialty.toLowerCase().includes(key.toLowerCase()) || 
+        key.toLowerCase().includes(cleanSpecialty.toLowerCase())) {
+      return price;
+    }
+  }
+  
+  // Prix minimum par défaut si aucune correspondance
+  return 25;
+}
+
 const User = sequelize.define('User', {
   id: {
     type: DataTypes.UUID,
@@ -100,7 +182,10 @@ const User = sequelize.define('User', {
   },
   consultationPrice: {
     type: DataTypes.DECIMAL(10, 2),
-    defaultValue: 0.00
+    defaultValue: 25.00, // Prix minimum par défaut
+    validate: {
+      min: 0
+    }
   },
   availability: {
     type: DataTypes.JSONB,
@@ -208,14 +293,12 @@ const User = sequelize.define('User', {
           console.log('Mot de passe hashé avec succès');
         }
 
-        // ✅ CORRIGÉ : Formatage des langues
+        // ✅ FORMATAGE DES LANGUES
         if (user.languages) {
           if (typeof user.languages === 'string') {
             try {
-              // Essayer de parser si c'est une string JSON
               user.languages = JSON.parse(user.languages);
             } catch (e) {
-              // Sinon, créer un tableau avec la string
               user.languages = [user.languages];
             }
           }
@@ -223,15 +306,21 @@ const User = sequelize.define('User', {
             user.languages = [];
           }
         } else if (user.role === 'doctor') {
-          // Pour les médecins, initialiser un tableau vide si pas de langues
           user.languages = [];
         }
 
-        // ✅ CORRIGÉ : NE PAS NETTOYER LES CHAMPS MÉDECIN
-        // Les champs specialty, licenseNumber, biography DOIVENT être conservés
-        console.log('Avant hook - Spécialité:', user.specialty);
-        console.log('Avant hook - License:', user.licenseNumber);
-        console.log('Avant hook - Biographie:', user.biography);
+        // ✅ DÉFINIR LE PRIX EN FONCTION DE LA SPÉCIALITÉ POUR LES MÉDECINS
+        if (user.role === 'doctor' && user.specialty) {
+          // Si le prix n'est pas défini ou est à 0, utiliser le prix basé sur la spécialité
+          if (!user.consultationPrice || user.consultationPrice === 0) {
+            const calculatedPrice = getPriceForSpecialty(user.specialty);
+            user.consultationPrice = calculatedPrice;
+            console.log(`💰 Prix défini pour spécialité "${user.specialty}": ${calculatedPrice}€`);
+          }
+        } else if (user.role !== 'doctor') {
+          // Pour les non-médecins, prix à 0
+          user.consultationPrice = 0;
+        }
 
         // Nettoyer bloodType si vide
         if (user.bloodType === '' || user.bloodType === null) {
@@ -239,8 +328,7 @@ const User = sequelize.define('User', {
         }
 
         console.log('✅ Hooks beforeCreate terminés avec succès');
-        console.log('Après hook - Spécialité:', user.specialty);
-        console.log('Après hook - License:', user.licenseNumber);
+        console.log('💰 Consultation price final:', user.consultationPrice);
 
       } catch (error) {
         console.error('❌ Erreur dans beforeCreate:', error);
@@ -251,17 +339,21 @@ const User = sequelize.define('User', {
     beforeUpdate: async (user) => {
       try {
         console.log('Hook beforeUpdate - User:', user.email, 'Changements:', user.changed());
-        console.log('Rôle actuel:', user.role, 'Rôle précédent:', user._previousDataValues?.role);
-        
-        // ❌ SUPPRIMÉ : Logique de nettoyage basée sur le rôle
-        // Le rôle ne doit JAMAIS nettoyer automatiquement les champs
+        console.log('Rôle actuel:', user.role);
         
         if (user.changed('password')) {
           console.log('Hook beforeUpdate - Hachage du nouveau mot de passe');
           user.password = await bcrypt.hash(user.password, 12);
         }
 
-        // ✅ Formatage des langues si elles changent
+        // ✅ METTRE À JOUR LE PRIX SI LA SPÉCIALITÉ CHANGE
+        if (user.role === 'doctor' && user.changed('specialty') && user.specialty) {
+          const calculatedPrice = getPriceForSpecialty(user.specialty);
+          user.consultationPrice = calculatedPrice;
+          console.log(`💰 Prix mis à jour pour nouvelle spécialité "${user.specialty}": ${calculatedPrice}€`);
+        }
+
+        // ✅ FORMATAGE DES LANGUES
         if (user.changed('languages') && user.languages) {
           if (typeof user.languages === 'string') {
             try {
