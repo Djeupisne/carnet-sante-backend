@@ -15,25 +15,21 @@ const Notification = sequelize.define('Notification', {
       key: 'id'
     }
   },
-  // ✅ CORRIGÉ - Ajout de tous les types de notifications pour les rendez-vous
   type: {
     type: DataTypes.ENUM(
-      // Notifications de rendez-vous
-      'new_appointment',
-      'appointment_confirmed',
-      'appointment_cancelled',
-      'appointment_completed',
       'appointment_reminder',
-      'appointment_update',
-      
-      // Autres notifications
-      'new_message',
+      'appointment_confirmation',
+      'appointment_cancellation',
+      'prescription_reminder',
       'medical_result',
-      'payment_confirmation',
-      'security_alert',
-      'system_announcement'
+      'system_alert',
+      'welcome'
     ),
     allowNull: false
+  },
+  channel: {
+    type: DataTypes.ENUM('email', 'sms', 'push', 'in_app'),
+    defaultValue: 'in_app'
   },
   title: {
     type: DataTypes.STRING,
@@ -47,37 +43,49 @@ const Notification = sequelize.define('Notification', {
     type: DataTypes.JSONB,
     defaultValue: {}
   },
-  isRead: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: false
-  },
-  // ✅ CORRIGÉ - Gardé comme ENUM car c'est standard
   priority: {
     type: DataTypes.ENUM('low', 'medium', 'high', 'urgent'),
     defaultValue: 'medium'
   },
+  isRead: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  isDelivered: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
   scheduledFor: {
-    type: DataTypes.DATE
+    type: DataTypes.DATE,
+    allowNull: true
   },
   sentAt: {
-    type: DataTypes.DATE
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  expiresAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+  metadata: {
+    type: DataTypes.JSONB,
+    defaultValue: {}
   }
 }, {
   tableName: 'Notifications',
   indexes: [
-    {
-      fields: ['userId']
-    },
-    {
-      fields: ['userId', 'isRead']
-    },
-    {
-      fields: ['type']
-    },
-    {
-      fields: ['scheduledFor']
-    }
+    { fields: ['userId', 'createdAt'] },
+    { fields: ['userId', 'isRead'] },
+    { fields: ['type'] },
+    { fields: ['scheduledFor'] }
   ]
 });
+
+Notification.associate = function(models) {
+  Notification.belongsTo(models.User, {
+    foreignKey: 'userId',
+    as: 'user'
+  });
+};
 
 module.exports = Notification;
