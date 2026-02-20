@@ -2,7 +2,7 @@
 const { Appointment, User, Payment, AuditLog, Op, sequelize } = require('../models');
 const { validationService } = require('../services/validationService');
 
-// ✅ CORRIGÉ: IMPORT DIRECT, PAS DE DESTRUCTURATION !
+// ✅ IMPORT DU SERVICE DE NOTIFICATION
 const notificationService = require('../services/notificationService');
 const { v4: uuidv4 } = require('uuid');
 
@@ -287,31 +287,29 @@ const createAppointment = async (req, res) => {
       ]
     });
 
-    // ✅ NOTIFICATION - VERSION ROBUSTE
+    // ✅ NOTIFICATION au médecin pour nouveau rendez-vous
     try {
-      if (notificationService && typeof notificationService.createNotification === 'function') {
-        const patientFirstName = req.user?.firstName || 'Patient';
-        const patientLastName = req.user?.lastName || '';
-        
-        await notificationService.createNotification({
-          userId: doctorId,
-          type: 'new_appointment',
-          title: 'Nouveau rendez-vous',
-          message: `Nouveau rendez-vous avec ${patientFirstName} ${patientLastName} le ${new Date(appointmentDate).toLocaleDateString('fr-FR')} à ${timeStr}`,
-          data: { 
-            appointmentId: appointment.id,
-            patientName: `${patientFirstName} ${patientLastName}`.trim(),
-            date: appointmentDate,
-            time: timeStr
-          }
-        });
-        console.log('✅ Notification créée avec succès');
-      } else {
-        console.warn('⚠️ Service de notification non disponible');
-      }
+      const patientFirstName = req.user?.firstName || 'Patient';
+      const patientLastName = req.user?.lastName || '';
+      
+      await notificationService.sendNotification({
+        userId: doctorId,
+        type: 'new_appointment',
+        channel: 'email',
+        title: '📅 Nouvelle demande de rendez-vous',
+        message: `Nouveau rendez-vous demandé par ${patientFirstName} ${patientLastName} le ${new Date(appointmentDate).toLocaleDateString('fr-FR')} à ${timeStr}`,
+        data: { 
+          appointmentId: appointment.id,
+          patientName: `${patientFirstName} ${patientLastName}`.trim(),
+          date: appointmentDate,
+          time: timeStr
+        },
+        priority: 'medium',
+        appointmentId: appointment.id
+      });
+      console.log('✅ Notification envoyée au médecin');
     } catch (notifError) {
-      console.error('❌ Erreur notification:', notifError.message);
-      // ✅ NE PAS BLOQUER LE RENDEZ-VOUS
+      console.warn('⚠️ Erreur notification:', notifError.message);
     }
 
     // Audit log
@@ -638,23 +636,20 @@ const cancelAppointment = async (req, res) => {
       cancelledAt: new Date()
     });
 
-    // Notification à l'autre partie
-    const notificationUserId = userRole === 'patient' 
-      ? appointment.doctorId 
-      : appointment.patientId;
-
+    // ✅ NOTIFICATION d'annulation à l'autre partie
     try {
-      if (notificationService && typeof notificationService.createNotification === 'function') {
-        await notificationService.createNotification({
-          userId: notificationUserId,
-          type: 'appointment_cancelled',
-          title: 'Rendez-vous annulé',
-          message: `Le rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} à ${formatTime(appointment.appointmentDate)} a été annulé.`,
-          data: { appointmentId: appointment.id }
-        });
+      const fullAppointment = await Appointment.findByPk(id, {
+        include: [
+          { model: User, as: 'patient' },
+          { model: User, as: 'doctor' }
+        ]
+      });
+      
+      if (fullAppointment) {
+        await notificationService.sendAppointmentCancellation(fullAppointment, userRole);
       }
     } catch (notifError) {
-      console.warn('⚠️ Erreur notification:', notifError.message);
+      console.warn('⚠️ Erreur notification annulation:', notifError.message);
     }
 
     console.log(`✅ Rendez-vous ${id} annulé avec succès`);
@@ -676,7 +671,7 @@ const cancelAppointment = async (req, res) => {
 };
 
 /**
- * ✅ Confirmer un rendez-vous (médecin)
+ * ✅ Confirmer un rendez-vous (médecin) - AVEC NOTIFICATIONS COMPLÈTES
  * PATCH /appointments/:id/confirm
  */
 const confirmAppointment = async (req, res) => {
@@ -690,12 +685,12 @@ const confirmAppointment = async (req, res) => {
         {
           model: User,
           as: 'patient',
-          attributes: ['id', 'firstName', 'lastName', 'email']
+          attributes: ['id', 'firstName', 'lastName', 'email', 'phoneNumber']
         },
         {
           model: User,
           as: 'doctor',
-          attributes: ['id', 'firstName', 'lastName']
+          attributes: ['id', 'firstName', 'lastName', 'email']
         }
       ]
     });
@@ -727,24 +722,12 @@ const confirmAppointment = async (req, res) => {
       confirmedAt: new Date()
     });
 
-    // Notification au patient
+    // ✅ NOTIFICATIONS COMPLÈTES - Patient et Médecin
     try {
-      if (notificationService && typeof notificationService.createNotification === 'function') {
-        await notificationService.createNotification({
-          userId: appointment.patientId,
-          type: 'appointment_confirmed',
-          title: '✅ Rendez-vous confirmé',
-          message: `Votre rendez-vous avec Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName} le ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} à ${new Date(appointment.appointmentDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} a été confirmé.`,
-          data: { 
-            appointmentId: appointment.id,
-            doctorName: `Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName}`,
-            date: appointment.appointmentDate
-          }
-        });
-        console.log(`📧 Notification envoyée au patient ${appointment.patientId}`);
-      }
+      await notificationService.sendAppointmentConfirmation(appointment);
+      console.log(`✅ Notifications envoyées pour le rendez-vous ${id}`);
     } catch (notifError) {
-      console.warn('⚠️ Erreur envoi notification:', notifError.message);
+      console.warn('⚠️ Erreur envoi notifications:', notifError.message);
     }
 
     // Audit log
@@ -770,10 +753,7 @@ const confirmAppointment = async (req, res) => {
     res.json({
       success: true,
       message: 'Rendez-vous confirmé avec succès',
-      data: {
-        appointment,
-        notification: 'Le patient a été notifié'
-      }
+      data: appointment
     });
 
   } catch (error) {
@@ -826,15 +806,22 @@ const completeAppointment = async (req, res) => {
       completedAt: new Date()
     });
 
-    // Notification au patient
+    // ✅ NOTIFICATION au patient que le rendez-vous est terminé
     try {
-      if (notificationService && typeof notificationService.createNotification === 'function') {
-        await notificationService.createNotification({
+      const fullAppointment = await Appointment.findByPk(id, {
+        include: [{ model: User, as: 'patient' }]
+      });
+      
+      if (fullAppointment && fullAppointment.patient) {
+        await notificationService.sendNotification({
           userId: appointment.patientId,
           type: 'appointment_completed',
-          title: 'Rendez-vous terminé',
+          channel: 'email',
+          title: '✓ Rendez-vous terminé',
           message: `Votre rendez-vous du ${new Date(appointment.appointmentDate).toLocaleDateString('fr-FR')} est terminé.`,
-          data: { appointmentId: appointment.id }
+          data: { appointmentId: appointment.id },
+          priority: 'medium',
+          appointmentId: appointment.id
         });
       }
     } catch (notifError) {
