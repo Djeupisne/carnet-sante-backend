@@ -29,6 +29,7 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "node-cache": "^5.1.2",
+    "node-cron": "^3.0.3",           // ← AJOUTEZ CETTE LIGNE
     "nodemailer": "^7.0.9",
     "pg": "^8.16.3",
     "pg-hstore": "^2.3.4",
