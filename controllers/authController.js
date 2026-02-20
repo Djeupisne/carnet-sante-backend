@@ -8,6 +8,9 @@ const { Op } = require('sequelize');
 const { ADMIN_USERS } = require('../config/adminUsers');
 const { v4: uuidv4 } = require('uuid');
 
+// ✅ NOUVEAU: Import du service de notification
+const notificationService = require('../services/notificationService');
+
 const generateToken = (userId) => {
   return jwt.sign(
     { userId },
@@ -213,6 +216,12 @@ const register = async (req, res) => {
       licenseNumber: user.licenseNumber,
       biographyLength: user.biography ? user.biography.length : 0,
       languages: user.languages
+    });
+
+    // ✅ NOUVEAU: Envoyer l'email de bienvenue (ne bloque pas)
+    console.log('📧 Envoi de l\'email de bienvenue...');
+    notificationService.sendWelcomeEmail(user).catch(err => {
+      console.warn('⚠️ Erreur envoi email de bienvenue:', err.message);
     });
 
     console.log('🔑 Génération du token JWT...');
