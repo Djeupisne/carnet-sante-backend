@@ -29,8 +29,26 @@ exports.getProfile = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
-    const updates = req.body;
     const userId = req.user.id;
+
+    // ✅ CORRECTION CRITIQUE : retirer les champs gérés séparément
+    // Le frontend envoie parfois profilePicture dans le body après l'upload,
+    // ce qui fait échouer la validation → 400
+    const {
+      profilePicture,  // ← ignoré ici, géré par POST /profile/picture
+      password,        // ← ignoré ici, géré par PATCH /profile/change-password
+      role,            // ← interdit
+      email,           // ← interdit
+      ...updates       // ← tout le reste est autorisé
+    } = req.body;
+
+    // Si le body ne contient que des champs ignorés, répondre OK directement
+    if (Object.keys(updates).length === 0) {
+      const currentUser = await User.findByPk(userId, {
+        attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] }
+      });
+      return res.json({ success: true, message: 'Profil inchangé', data: { user: currentUser } });
+    }
 
     const validation = validationService.validateProfileUpdate(updates);
     if (!validation.isValid) {
@@ -44,13 +62,6 @@ exports.updateProfile = async (req, res) => {
     const user = await User.findByPk(userId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
-    }
-
-    if (updates.role || updates.email) {
-      return res.status(403).json({
-        success: false,
-        message: 'Modification du rôle ou de l\'email non autorisée'
-      });
     }
 
     await user.update(updates);
@@ -218,22 +229,9 @@ exports.updatePreferences = async (req, res) => {
 };
 
 // ============================================
-// ✅ PHOTO DE PROFIL — CORRECTION PRINCIPALE
+// PHOTO DE PROFIL
 // ============================================
 
-/**
- * POST /api/profile/picture
- *
- * ✅ CORRECTION CRITIQUE :
- * On stocke l'URL COMPLÈTE (https://carnet-sante-backend.onrender.com/uploads/profiles/xxx.jpg)
- * pour que le frontend puisse l'utiliser directement comme attribut src d'une balise <img>.
- *
- * ❌ AVANT : on stockait "/uploads/profiles/xxx.jpg" (chemin relatif)
- *   → le navigateur résolvait par rapport au FRONTEND → 404
- *
- * ✅ APRÈS : on stocke "https://BACKEND/uploads/profiles/xxx.jpg" (URL absolue)
- *   → le navigateur charge depuis le BACKEND → ✅
- */
 exports.uploadProfilePicture = async (req, res) => {
   try {
     if (!req.file) {
@@ -241,21 +239,21 @@ exports.uploadProfilePicture = async (req, res) => {
     }
 
     // ✅ Construire l'URL complète avec le domaine du backend
+    // x-forwarded-proto est nécessaire sur Render (proxy HTTPS)
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.get('host');
     const baseUrl = `${protocol}://${host}`;
     const profilePictureUrl = `${baseUrl}/uploads/profiles/${req.file.filename}`;
 
-    console.log(`📸 Photo uploadée — URL complète: ${profilePictureUrl}`);
+    console.log(`📸 Photo uploadée — URL: ${profilePictureUrl}`);
 
     const user = await User.findByPk(req.user.id);
 
-    // Supprimer l'ancienne photo locale si elle existe
+    // Supprimer l'ancienne photo si elle existe
     if (user.profilePicture) {
       try {
         let oldFilePath = null;
         if (user.profilePicture.startsWith('http')) {
-          // Extraire le chemin depuis l'URL complète
           const url = new URL(user.profilePicture);
           oldFilePath = path.join(__dirname, '..', url.pathname);
         } else {
@@ -263,14 +261,13 @@ exports.uploadProfilePicture = async (req, res) => {
         }
         if (oldFilePath && fs.existsSync(oldFilePath)) {
           fs.unlinkSync(oldFilePath);
-          console.log(`🗑️ Ancienne photo supprimée: ${oldFilePath}`);
         }
       } catch (deleteErr) {
         console.warn('⚠️ Impossible de supprimer l\'ancienne photo:', deleteErr.message);
       }
     }
 
-    // ✅ Stocker l'URL complète en base de données
+    // ✅ Stocker l'URL COMPLÈTE en base de données
     await user.update({ profilePicture: profilePictureUrl });
 
     try {
@@ -284,9 +281,7 @@ exports.uploadProfilePicture = async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        profilePicture: profilePictureUrl  // ✅ URL complète retournée au frontend
-      },
+      data: { profilePicture: profilePictureUrl },
       message: 'Photo de profil mise à jour avec succès'
     });
 
@@ -309,9 +304,7 @@ exports.deleteProfilePicture = async (req, res) => {
         } else {
           filePath = path.join(__dirname, '..', user.profilePicture);
         }
-        if (filePath && fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
+        if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
       } catch (deleteErr) {
         console.warn('⚠️ Impossible de supprimer le fichier:', deleteErr.message);
       }
