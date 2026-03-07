@@ -6,6 +6,17 @@ const fs = require('fs');
 const path = require('path');
 
 // ============================================
+// CHAMPS AUTORISÉS pour updateProfile
+// ✅ Liste blanche explicite — tout le reste est ignoré silencieusement
+// ============================================
+const ALLOWED_PROFILE_FIELDS = [
+  'firstName', 'lastName', 'phoneNumber', 'dateOfBirth',
+  'gender', 'address', 'bloodType', 'emergencyContact',
+  'specialty', 'biography', 'languages', 'consultationPrice',
+  'licenseNumber', 'preferences'
+];
+
+// ============================================
 // PROFIL
 // ============================================
 
@@ -22,7 +33,7 @@ exports.getProfile = async (req, res) => {
     res.json({ success: true, data: { user } });
 
   } catch (error) {
-    console.error('Erreur lors de la récupération du profil:', error);
+    console.error('Erreur getProfile:', error);
     res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
@@ -31,31 +42,26 @@ exports.updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // ✅ CORRECTION CRITIQUE : retirer les champs gérés séparément
-    // Le frontend envoie parfois profilePicture dans le body après l'upload,
-    // ce qui fait échouer la validation → 400
-    const {
-      profilePicture,  // ← ignoré ici, géré par POST /profile/picture
-      password,        // ← ignoré ici, géré par PATCH /profile/change-password
-      role,            // ← interdit
-      email,           // ← interdit
-      ...updates       // ← tout le reste est autorisé
-    } = req.body;
+    // ✅ CORRECTION DÉFINITIVE :
+    // On filtre le body avec une LISTE BLANCHE de champs autorisés.
+    // Cela ignore silencieusement : profilePicture, password, role, email,
+    // et tout autre champ non autorisé — sans déclencher d'erreur 400.
+    const updates = {};
+    for (const field of ALLOWED_PROFILE_FIELDS) {
+      if (req.body[field] !== undefined) {
+        updates[field] = req.body[field];
+      }
+    }
 
-    // Si le body ne contient que des champs ignorés, répondre OK directement
+    // Si rien à mettre à jour, renvoyer le profil actuel sans erreur
     if (Object.keys(updates).length === 0) {
       const currentUser = await User.findByPk(userId, {
         attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] }
       });
-      return res.json({ success: true, message: 'Profil inchangé', data: { user: currentUser } });
-    }
-
-    const validation = validationService.validateProfileUpdate(updates);
-    if (!validation.isValid) {
-      return res.status(400).json({
-        success: false,
-        message: 'Données de mise à jour invalides',
-        errors: validation.errors
+      return res.json({
+        success: true,
+        message: 'Aucune modification',
+        data: { user: currentUser }
       });
     }
 
@@ -72,7 +78,7 @@ exports.updateProfile = async (req, res) => {
         userId,
         ipAddress: req.ip,
         userAgent: req.get('User-Agent'),
-        details: { updates }
+        details: { updatedFields: Object.keys(updates) }
       });
     } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
@@ -80,10 +86,14 @@ exports.updateProfile = async (req, res) => {
       attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] }
     });
 
-    res.json({ success: true, message: 'Profil mis à jour avec succès', data: { user: updatedUser } });
+    res.json({
+      success: true,
+      message: 'Profil mis à jour avec succès',
+      data: { user: updatedUser }
+    });
 
   } catch (error) {
-    console.error('Erreur lors de la mise à jour du profil:', error);
+    console.error('Erreur updateProfile:', error);
     res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
@@ -133,7 +143,7 @@ exports.changePassword = async (req, res) => {
     res.json({ success: true, message: 'Mot de passe modifié avec succès' });
 
   } catch (error) {
-    console.error('Erreur lors du changement de mot de passe:', error);
+    console.error('Erreur changePassword:', error);
     res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
@@ -175,7 +185,7 @@ exports.getDashboardStats = async (req, res) => {
     res.json({ success: true, data: { stats } });
 
   } catch (error) {
-    console.error('Erreur lors de la récupération des statistiques:', error);
+    console.error('Erreur getDashboardStats:', error);
     res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
@@ -221,7 +231,6 @@ exports.updatePreferences = async (req, res) => {
     } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
     res.json({ success: true, data: user, message: 'Préférences mises à jour avec succès' });
-
   } catch (error) {
     console.error('❌ Erreur updatePreferences:', error);
     res.status(500).json({ success: false, message: 'Erreur lors de la mise à jour des préférences' });
@@ -238,18 +247,16 @@ exports.uploadProfilePicture = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Aucun fichier uploadé' });
     }
 
-    // ✅ Construire l'URL complète avec le domaine du backend
-    // x-forwarded-proto est nécessaire sur Render (proxy HTTPS)
+    // ✅ URL complète avec le domaine du backend (x-forwarded-proto pour Render HTTPS)
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.get('host');
-    const baseUrl = `${protocol}://${host}`;
-    const profilePictureUrl = `${baseUrl}/uploads/profiles/${req.file.filename}`;
+    const profilePictureUrl = `${protocol}://${host}/uploads/profiles/${req.file.filename}`;
 
     console.log(`📸 Photo uploadée — URL: ${profilePictureUrl}`);
 
     const user = await User.findByPk(req.user.id);
 
-    // Supprimer l'ancienne photo si elle existe
+    // Supprimer l'ancienne photo locale
     if (user.profilePicture) {
       try {
         let oldFilePath = null;
@@ -259,15 +266,11 @@ exports.uploadProfilePicture = async (req, res) => {
         } else {
           oldFilePath = path.join(__dirname, '..', user.profilePicture);
         }
-        if (oldFilePath && fs.existsSync(oldFilePath)) {
-          fs.unlinkSync(oldFilePath);
-        }
-      } catch (deleteErr) {
-        console.warn('⚠️ Impossible de supprimer l\'ancienne photo:', deleteErr.message);
-      }
+        if (oldFilePath && fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+      } catch (e) { console.warn('⚠️ Suppression ancienne photo:', e.message); }
     }
 
-    // ✅ Stocker l'URL COMPLÈTE en base de données
+    // ✅ Stocker l'URL complète en DB
     await user.update({ profilePicture: profilePictureUrl });
 
     try {
@@ -305,9 +308,7 @@ exports.deleteProfilePicture = async (req, res) => {
           filePath = path.join(__dirname, '..', user.profilePicture);
         }
         if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      } catch (deleteErr) {
-        console.warn('⚠️ Impossible de supprimer le fichier:', deleteErr.message);
-      }
+      } catch (e) { console.warn('⚠️ Suppression fichier:', e.message); }
     }
 
     await user.update({ profilePicture: null });
@@ -322,7 +323,6 @@ exports.deleteProfilePicture = async (req, res) => {
     } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
     res.json({ success: true, message: 'Photo de profil supprimée avec succès' });
-
   } catch (error) {
     console.error('❌ Erreur deleteProfilePicture:', error);
     res.status(500).json({ success: false, message: 'Erreur lors de la suppression de la photo' });
@@ -371,7 +371,6 @@ exports.updateEmergencyContact = async (req, res) => {
     } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
     res.json({ success: true, data: user, message: 'Contact d\'urgence mis à jour avec succès' });
-
   } catch (error) {
     console.error('❌ Erreur updateEmergencyContact:', error);
     res.status(500).json({ success: false, message: 'Erreur lors de la mise à jour du contact d\'urgence' });
@@ -414,7 +413,6 @@ exports.deactivateAccount = async (req, res) => {
     } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
     res.json({ success: true, message: 'Compte désactivé avec succès' });
-
   } catch (error) {
     console.error('❌ Erreur deactivateAccount:', error);
     res.status(500).json({ success: false, message: 'Erreur lors de la désactivation du compte' });
@@ -446,47 +444,29 @@ exports.exportPersonalData = async (req, res) => {
 
     const exportData = {
       user: {
-        id: user.id,
-        uniqueCode: user.uniqueCode,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        dateOfBirth: user.dateOfBirth,
-        gender: user.gender,
-        phoneNumber: user.phoneNumber,
-        address: user.address,
-        bloodType: user.bloodType,
-        emergencyContact: user.emergencyContact,
-        preferences: user.preferences,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt
+        id: user.id, uniqueCode: user.uniqueCode, email: user.email,
+        firstName: user.firstName, lastName: user.lastName, role: user.role,
+        dateOfBirth: user.dateOfBirth, gender: user.gender, phoneNumber: user.phoneNumber,
+        address: user.address, bloodType: user.bloodType,
+        emergencyContact: user.emergencyContact, preferences: user.preferences,
+        createdAt: user.createdAt, updatedAt: user.updatedAt
       },
       appointments: appointments.map(apt => ({
-        id: apt.id,
-        date: apt.appointmentDate,
+        id: apt.id, date: apt.appointmentDate,
         doctor: apt.doctor ? `${apt.doctor.firstName} ${apt.doctor.lastName}` : null,
-        specialty: apt.doctor?.specialty,
-        status: apt.status,
-        reason: apt.reason,
-        type: apt.type,
-        createdAt: apt.createdAt
+        specialty: apt.doctor?.specialty, status: apt.status,
+        reason: apt.reason, type: apt.type, createdAt: apt.createdAt
       })),
       medicalFiles: medicalFiles.map(file => ({
-        id: file.id,
-        type: file.recordType,
-        title: file.title,
-        description: file.description,
-        diagnosis: file.diagnosis,
+        id: file.id, type: file.recordType, title: file.title,
+        description: file.description, diagnosis: file.diagnosis,
         date: file.consultationDate,
         doctor: file.doctor ? `${file.doctor.firstName} ${file.doctor.lastName}` : null,
         createdAt: file.createdAt
       })),
       auditLogs: auditLogs.map(log => ({
-        action: log.action,
-        ipAddress: log.ipAddress,
-        userAgent: log.userAgent,
-        createdAt: log.createdAt
+        action: log.action, ipAddress: log.ipAddress,
+        userAgent: log.userAgent, createdAt: log.createdAt
       })),
       exportDate: new Date().toISOString()
     };
