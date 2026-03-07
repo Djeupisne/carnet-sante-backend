@@ -6,12 +6,19 @@ const fs = require('fs');
 const router = express.Router();
 const profileController = require('../controllers/profileController');
 const { handleValidationErrors, sanitizeInput } = require('../middleware/validation');
-const { authenticate } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 
-// Configuration multer pour l'upload de photos
+// ✅ [CORRECTION] Utiliser authenticateToken (pas authenticate qui n'existe pas)
+const authenticate = authenticateToken;
+
+// ============================================
+// ✅ [CORRECTION] Configuration multer
+// Dossier en minuscules 'uploads' (cohérent avec app.js statique)
+// ============================================
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = './uploads/profiles';
+    // ✅ CORRECTION : 'uploads' minuscule partout pour Linux (Render est case-sensitive)
+    const dir = path.join(__dirname, '..', 'uploads', 'profiles');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -24,14 +31,13 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = allowedTypes.test(file.mimetype);
-    
     if (mimetype && extname) {
       return cb(null, true);
     } else {
@@ -40,7 +46,10 @@ const upload = multer({
   }
 });
 
-// Validation rules
+// ============================================
+// VALIDATION RULES
+// ============================================
+
 const updateProfileValidation = [
   body('firstName').optional().notEmpty().trim(),
   body('lastName').optional().notEmpty().trim(),
@@ -68,11 +77,11 @@ const emergencyContactValidation = [
   body('relationship').optional().trim()
 ];
 
-// Routes existantes
-router.get('/',
-  authenticate,
-  profileController.getProfile
-);
+// ============================================
+// ROUTES DE BASE
+// ============================================
+
+router.get('/', authenticate, profileController.getProfile);
 
 router.put('/',
   authenticate,
@@ -90,28 +99,14 @@ router.patch('/change-password',
   profileController.changePassword
 );
 
-router.get('/dashboard',
-  authenticate,
-  profileController.getDashboardStats
-);
+router.get('/dashboard', authenticate, profileController.getDashboardStats);
 
 // ============================================
-// ✅ NOUVELLES ROUTES POUR LES PRÉFÉRENCES
+// ROUTES PRÉFÉRENCES
 // ============================================
 
-/**
- * GET /api/profile/preferences
- * Récupérer les préférences de l'utilisateur
- */
-router.get('/preferences',
-  authenticate,
-  profileController.getPreferences
-);
+router.get('/preferences', authenticate, profileController.getPreferences);
 
-/**
- * PATCH /api/profile/preferences
- * Mettre à jour les préférences de l'utilisateur
- */
 router.patch('/preferences',
   authenticate,
   sanitizeInput,
@@ -121,12 +116,12 @@ router.patch('/preferences',
 );
 
 // ============================================
-// ✅ NOUVELLES ROUTES POUR LA PHOTO DE PROFIL
+// ROUTES PHOTO DE PROFIL
 // ============================================
 
 /**
  * POST /api/profile/picture
- * Uploader une photo de profil
+ * ✅ upload.single('profilePicture') utilise maintenant le bon dossier
  */
 router.post('/picture',
   authenticate,
@@ -134,32 +129,14 @@ router.post('/picture',
   profileController.uploadProfilePicture
 );
 
-/**
- * DELETE /api/profile/picture
- * Supprimer la photo de profil
- */
-router.delete('/picture',
-  authenticate,
-  profileController.deleteProfilePicture
-);
+router.delete('/picture', authenticate, profileController.deleteProfilePicture);
 
 // ============================================
-// ✅ NOUVELLES ROUTES POUR LE CONTACT D'URGENCE
+// ROUTES CONTACT D'URGENCE
 // ============================================
 
-/**
- * GET /api/profile/emergency-contact
- * Récupérer le contact d'urgence
- */
-router.get('/emergency-contact',
-  authenticate,
-  profileController.getEmergencyContact
-);
+router.get('/emergency-contact', authenticate, profileController.getEmergencyContact);
 
-/**
- * PUT /api/profile/emergency-contact
- * Mettre à jour le contact d'urgence
- */
 router.put('/emergency-contact',
   authenticate,
   sanitizeInput,
@@ -169,34 +146,13 @@ router.put('/emergency-contact',
 );
 
 // ============================================
-// ✅ NOUVELLES ROUTES POUR L'HISTORIQUE ET EXPORT
+// ROUTES HISTORIQUE ET EXPORT
 // ============================================
 
-/**
- * GET /api/profile/login-history
- * Récupérer l'historique des connexions
- */
-router.get('/login-history',
-  authenticate,
-  profileController.getLoginHistory
-);
+router.get('/login-history', authenticate, profileController.getLoginHistory);
 
-/**
- * POST /api/profile/deactivate
- * Désactiver le compte
- */
-router.post('/deactivate',
-  authenticate,
-  profileController.deactivateAccount
-);
+router.post('/deactivate', authenticate, profileController.deactivateAccount);
 
-/**
- * GET /api/profile/export-data
- * Exporter toutes les données personnelles
- */
-router.get('/export-data',
-  authenticate,
-  profileController.exportPersonalData
-);
+router.get('/export-data', authenticate, profileController.exportPersonalData);
 
 module.exports = router;
