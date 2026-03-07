@@ -141,7 +141,7 @@ app.use((req, res, next) => {
 });
 
 // Servir les fichiers statiques
-app.use('/uploads', express.static(path.join(__dirname, 'Uploads'), {
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   setHeaders: (res, path) => {
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET');
