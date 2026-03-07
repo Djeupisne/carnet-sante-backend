@@ -77,7 +77,7 @@ exports.createMedicalRecord = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Dossier médical créé avec succès',
-      data: { medicalFile }
+      data: medicalFile
     });
 
   } catch (error) {
@@ -97,7 +97,7 @@ exports.createMedicalRecord = async (req, res) => {
 exports.getPatientMedicalFiles = async (req, res) => {
   try {
     const { patientId } = req.params;
-    const { page = 1, limit = 20, recordType } = req.query;
+    const { page = 1, limit = 100, recordType } = req.query;
 
     console.log(`📁 Récupération des dossiers médicaux pour le patient ${patientId}...`);
 
@@ -130,8 +130,7 @@ exports.getPatientMedicalFiles = async (req, res) => {
       offset
     });
 
-    // ✅ CORRECTION : Log d'accès simplifié sans sequelize.fn qui causait le 500
-    // On met à jour chaque fichier individuellement pour éviter l'erreur array_append
+    // Log d'accès (sans bloquer la réponse si ça échoue)
     try {
       for (const file of medicalFiles) {
         const currentLog = Array.isArray(file.accessLog) ? file.accessLog : [];
@@ -143,21 +142,21 @@ exports.getPatientMedicalFiles = async (req, res) => {
         });
       }
     } catch (logError) {
-      // Ne pas bloquer la réponse si le log échoue
       console.warn('⚠️ Erreur log accès:', logError.message);
     }
 
     console.log(`✅ ${medicalFiles.length} dossiers médicaux trouvés pour le patient ${patientId}`);
 
+    // ✅ CORRECTION CRITIQUE : retourner data comme un TABLEAU directement
+    // Le frontend fait data.filter(...) et data.map(...)
     res.json({
       success: true,
-      data: {
-        medicalFiles,
-        pagination: {
-          current: parseInt(page),
-          total: Math.ceil(count / parseInt(limit)),
-          totalRecords: count
-        }
+      data: medicalFiles,  // ← tableau directement, pas { medicalFiles, pagination }
+      count: medicalFiles.length,
+      pagination: {
+        current: parseInt(page),
+        total: Math.ceil(count / parseInt(limit)),
+        totalRecords: count
       }
     });
 
@@ -224,7 +223,7 @@ exports.getMedicalFileById = async (req, res) => {
 
     res.json({
       success: true,
-      data: { medicalFile }
+      data: medicalFile  // ← objet unique, pas de wrapper supplémentaire
     });
 
   } catch (error) {
@@ -290,7 +289,7 @@ exports.updateMedicalFile = async (req, res) => {
     res.json({
       success: true,
       message: 'Dossier médical mis à jour avec succès',
-      data: { medicalFile }
+      data: medicalFile
     });
 
   } catch (error) {
