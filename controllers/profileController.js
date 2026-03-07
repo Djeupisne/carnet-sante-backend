@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 // ============================================
-// MÉTHODES EXISTANTES
+// PROFIL
 // ============================================
 
 exports.getProfile = async (req, res) => {
@@ -16,23 +16,14 @@ exports.getProfile = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Utilisateur non trouvé'
-      });
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
     }
 
-    res.json({
-      success: true,
-      data: { user }
-    });
+    res.json({ success: true, data: { user } });
 
   } catch (error) {
     console.error('Erreur lors de la récupération du profil:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur interne du serveur'
-    });
+    res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
 
@@ -41,7 +32,6 @@ exports.updateProfile = async (req, res) => {
     const updates = req.body;
     const userId = req.user.id;
 
-    // Validation des données
     const validation = validationService.validateProfileUpdate(updates);
     if (!validation.isValid) {
       return res.status(400).json({
@@ -53,13 +43,9 @@ exports.updateProfile = async (req, res) => {
 
     const user = await User.findByPk(userId);
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Utilisateur non trouvé'
-      });
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
     }
 
-    // Empêcher la modification du rôle et de l'email
     if (updates.role || updates.email) {
       return res.status(403).json({
         success: false,
@@ -69,32 +55,25 @@ exports.updateProfile = async (req, res) => {
 
     await user.update(updates);
 
-    // Log d'audit
-    await AuditLog.create({
-      action: 'PROFILE_UPDATED',
-      userId: userId,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-      details: { updates }
-    });
+    try {
+      await AuditLog.create({
+        action: 'PROFILE_UPDATED',
+        userId,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        details: { updates }
+      });
+    } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
-    // Retourner l'utilisateur mis à jour sans le mot de passe
     const updatedUser = await User.findByPk(userId, {
       attributes: { exclude: ['password', 'resetToken', 'resetTokenExpiry'] }
     });
 
-    res.json({
-      success: true,
-      message: 'Profil mis à jour avec succès',
-      data: { user: updatedUser }
-    });
+    res.json({ success: true, message: 'Profil mis à jour avec succès', data: { user: updatedUser } });
 
   } catch (error) {
     console.error('Erreur lors de la mise à jour du profil:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur interne du serveur'
-    });
+    res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
 
@@ -112,22 +91,14 @@ exports.changePassword = async (req, res) => {
 
     const user = await User.findByPk(userId);
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Utilisateur non trouvé'
-      });
+      return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
     }
 
-    // Vérifier le mot de passe actuel
     const isCurrentPasswordValid = await user.comparePassword(currentPassword);
     if (!isCurrentPasswordValid) {
-      return res.status(400).json({
-        success: false,
-        message: 'Mot de passe actuel incorrect'
-      });
+      return res.status(400).json({ success: false, message: 'Mot de passe actuel incorrect' });
     }
 
-    // Validation du nouveau mot de passe
     const passwordValidation = validationService.validatePassword(newPassword);
     if (!passwordValidation.isValid) {
       return res.status(400).json({
@@ -137,28 +108,22 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Mettre à jour le mot de passe
     await user.update({ password: newPassword });
 
-    // Log d'audit
-    await AuditLog.create({
-      action: 'PASSWORD_CHANGED',
-      userId: userId,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
-    });
+    try {
+      await AuditLog.create({
+        action: 'PASSWORD_CHANGED',
+        userId,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
-    res.json({
-      success: true,
-      message: 'Mot de passe modifié avec succès'
-    });
+    res.json({ success: true, message: 'Mot de passe modifié avec succès' });
 
   } catch (error) {
     console.error('Erreur lors du changement de mot de passe:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur interne du serveur'
-    });
+    res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
 
@@ -166,37 +131,18 @@ exports.getDashboardStats = async (req, res) => {
   try {
     const userId = req.user.id;
     const userRole = req.user.role;
-
     let stats = {};
 
     if (userRole === 'patient') {
-      const totalAppointments = await Appointment.count({
-        where: { patientId: userId }
-      });
-
+      const totalAppointments = await Appointment.count({ where: { patientId: userId } });
       const upcomingAppointments = await Appointment.count({
-        where: {
-          patientId: userId,
-          status: 'confirmed',
-          appointmentDate: { [Op.gte]: new Date() }
-        }
+        where: { patientId: userId, status: 'confirmed', appointmentDate: { [Op.gte]: new Date() } }
       });
-
-      const medicalFiles = await MedicalFile.count({
-        where: { patientId: userId }
-      });
-
-      stats = {
-        totalAppointments,
-        upcomingAppointments,
-        medicalFiles
-      };
+      const medicalFiles = await MedicalFile.count({ where: { patientId: userId } });
+      stats = { totalAppointments, upcomingAppointments, medicalFiles };
 
     } else if (userRole === 'doctor') {
-      const totalAppointments = await Appointment.count({
-        where: { doctorId: userId }
-      });
-
+      const totalAppointments = await Appointment.count({ where: { doctorId: userId } });
       const todayAppointments = await Appointment.count({
         where: {
           doctorId: userId,
@@ -207,246 +153,211 @@ exports.getDashboardStats = async (req, res) => {
           }
         }
       });
-
       const totalPatients = await Appointment.count({
         where: { doctorId: userId },
         distinct: true,
         col: 'patientId'
       });
-
-      stats = {
-        totalAppointments,
-        todayAppointments,
-        totalPatients
-      };
+      stats = { totalAppointments, todayAppointments, totalPatients };
     }
 
-    res.json({
-      success: true,
-      data: { stats }
-    });
+    res.json({ success: true, data: { stats } });
 
   } catch (error) {
     console.error('Erreur lors de la récupération des statistiques:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur interne du serveur'
-    });
+    res.status(500).json({ success: false, message: 'Erreur interne du serveur' });
   }
 };
 
 // ============================================
-// ✅ NOUVELLES MÉTHODES POUR LES PRÉFÉRENCES
+// PRÉFÉRENCES
 // ============================================
 
-/**
- * GET /api/profile/preferences
- * Récupérer les préférences de l'utilisateur
- */
 exports.getPreferences = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
-    
-    // Préférences par défaut
     const defaultPreferences = {
       language: 'fr',
       theme: 'dark',
-      notifications: {
-        email: true,
-        sms: false,
-        push: true
-      }
+      notifications: { email: true, sms: false, push: true }
     };
-
-    res.json({
-      success: true,
-      data: user.preferences || defaultPreferences
-    });
-
+    res.json({ success: true, data: user.preferences || defaultPreferences });
   } catch (error) {
     console.error('❌ Erreur getPreferences:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la récupération des préférences'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de la récupération des préférences' });
   }
 };
 
-/**
- * PATCH /api/profile/preferences
- * Mettre à jour les préférences de l'utilisateur
- */
 exports.updatePreferences = async (req, res) => {
   try {
     const { preferences } = req.body;
     const user = await User.findByPk(req.user.id);
 
-    // Validation basique
     if (!preferences || typeof preferences !== 'object') {
-      return res.status(400).json({
-        success: false,
-        message: 'Données de préférences invalides'
-      });
+      return res.status(400).json({ success: false, message: 'Données de préférences invalides' });
     }
 
     await user.update({ preferences });
 
-    // Log d'audit
-    await AuditLog.create({
-      action: 'PREFERENCES_UPDATED',
-      userId: user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-      details: { preferences }
-    });
+    try {
+      await AuditLog.create({
+        action: 'PREFERENCES_UPDATED',
+        userId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        details: { preferences }
+      });
+    } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
-    res.json({
-      success: true,
-      data: user,
-      message: 'Préférences mises à jour avec succès'
-    });
+    res.json({ success: true, data: user, message: 'Préférences mises à jour avec succès' });
 
   } catch (error) {
     console.error('❌ Erreur updatePreferences:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la mise à jour des préférences'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de la mise à jour des préférences' });
   }
 };
 
 // ============================================
-// ✅ NOUVELLES MÉTHODES POUR LA PHOTO DE PROFIL
+// ✅ PHOTO DE PROFIL — CORRECTION PRINCIPALE
 // ============================================
 
 /**
  * POST /api/profile/picture
- * Uploader une photo de profil
+ *
+ * ✅ CORRECTION CRITIQUE :
+ * On stocke l'URL COMPLÈTE (https://carnet-sante-backend.onrender.com/uploads/profiles/xxx.jpg)
+ * pour que le frontend puisse l'utiliser directement comme attribut src d'une balise <img>.
+ *
+ * ❌ AVANT : on stockait "/uploads/profiles/xxx.jpg" (chemin relatif)
+ *   → le navigateur résolvait par rapport au FRONTEND → 404
+ *
+ * ✅ APRÈS : on stocke "https://BACKEND/uploads/profiles/xxx.jpg" (URL absolue)
+ *   → le navigateur charge depuis le BACKEND → ✅
  */
 exports.uploadProfilePicture = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'Aucun fichier uploadé'
-      });
+      return res.status(400).json({ success: false, message: 'Aucun fichier uploadé' });
     }
 
-    const profilePicture = `/uploads/profiles/${req.file.filename}`;
+    // ✅ Construire l'URL complète avec le domaine du backend
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    const profilePictureUrl = `${baseUrl}/uploads/profiles/${req.file.filename}`;
+
+    console.log(`📸 Photo uploadée — URL complète: ${profilePictureUrl}`);
+
     const user = await User.findByPk(req.user.id);
 
-    // Supprimer l'ancienne photo si elle existe
+    // Supprimer l'ancienne photo locale si elle existe
     if (user.profilePicture) {
-      const oldPath = path.join(__dirname, '..', user.profilePicture);
-      if (fs.existsSync(oldPath)) {
-        fs.unlinkSync(oldPath);
+      try {
+        let oldFilePath = null;
+        if (user.profilePicture.startsWith('http')) {
+          // Extraire le chemin depuis l'URL complète
+          const url = new URL(user.profilePicture);
+          oldFilePath = path.join(__dirname, '..', url.pathname);
+        } else {
+          oldFilePath = path.join(__dirname, '..', user.profilePicture);
+        }
+        if (oldFilePath && fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+          console.log(`🗑️ Ancienne photo supprimée: ${oldFilePath}`);
+        }
+      } catch (deleteErr) {
+        console.warn('⚠️ Impossible de supprimer l\'ancienne photo:', deleteErr.message);
       }
     }
 
-    await user.update({ profilePicture });
+    // ✅ Stocker l'URL complète en base de données
+    await user.update({ profilePicture: profilePictureUrl });
 
-    // Log d'audit
-    await AuditLog.create({
-      action: 'PROFILE_PICTURE_UPDATED',
-      userId: user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
-    });
+    try {
+      await AuditLog.create({
+        action: 'PROFILE_PICTURE_UPDATED',
+        userId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
     res.json({
       success: true,
-      data: { profilePicture },
+      data: {
+        profilePicture: profilePictureUrl  // ✅ URL complète retournée au frontend
+      },
       message: 'Photo de profil mise à jour avec succès'
     });
 
   } catch (error) {
     console.error('❌ Erreur uploadProfilePicture:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de l\'upload de la photo'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de l\'upload de la photo' });
   }
 };
 
-/**
- * DELETE /api/profile/picture
- * Supprimer la photo de profil
- */
 exports.deleteProfilePicture = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
 
     if (user.profilePicture) {
-      const filePath = path.join(__dirname, '..', user.profilePicture);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      try {
+        let filePath = null;
+        if (user.profilePicture.startsWith('http')) {
+          const url = new URL(user.profilePicture);
+          filePath = path.join(__dirname, '..', url.pathname);
+        } else {
+          filePath = path.join(__dirname, '..', user.profilePicture);
+        }
+        if (filePath && fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (deleteErr) {
+        console.warn('⚠️ Impossible de supprimer le fichier:', deleteErr.message);
       }
     }
 
     await user.update({ profilePicture: null });
 
-    // Log d'audit
-    await AuditLog.create({
-      action: 'PROFILE_PICTURE_DELETED',
-      userId: user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
-    });
+    try {
+      await AuditLog.create({
+        action: 'PROFILE_PICTURE_DELETED',
+        userId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
-    res.json({
-      success: true,
-      message: 'Photo de profil supprimée avec succès'
-    });
+    res.json({ success: true, message: 'Photo de profil supprimée avec succès' });
 
   } catch (error) {
     console.error('❌ Erreur deleteProfilePicture:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la suppression de la photo'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de la suppression de la photo' });
   }
 };
 
 // ============================================
-// ✅ NOUVELLES MÉTHODES POUR LE CONTACT D'URGENCE
+// CONTACT D'URGENCE
 // ============================================
 
-/**
- * GET /api/profile/emergency-contact
- * Récupérer le contact d'urgence
- */
 exports.getEmergencyContact = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
-
     res.json({
       success: true,
-      data: user.emergencyContact || {
-        name: '',
-        phone: '',
-        relationship: ''
-      }
+      data: user.emergencyContact || { name: '', phone: '', relationship: '' }
     });
-
   } catch (error) {
     console.error('❌ Erreur getEmergencyContact:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la récupération du contact d\'urgence'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de la récupération du contact d\'urgence' });
   }
 };
 
-/**
- * PUT /api/profile/emergency-contact
- * Mettre à jour le contact d'urgence
- */
 exports.updateEmergencyContact = async (req, res) => {
   try {
     const { name, phone, relationship } = req.body;
     const user = await User.findByPk(req.user.id);
 
-    // Validation simple
     if (!name || !phone || !relationship) {
       return res.status(400).json({
         success: false,
@@ -454,105 +365,69 @@ exports.updateEmergencyContact = async (req, res) => {
       });
     }
 
-    await user.update({
-      emergencyContact: { name, phone, relationship }
-    });
+    await user.update({ emergencyContact: { name, phone, relationship } });
 
-    // Log d'audit
-    await AuditLog.create({
-      action: 'EMERGENCY_CONTACT_UPDATED',
-      userId: user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-      details: { name, phone, relationship }
-    });
+    try {
+      await AuditLog.create({
+        action: 'EMERGENCY_CONTACT_UPDATED',
+        userId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        details: { name, phone, relationship }
+      });
+    } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
-    res.json({
-      success: true,
-      data: user,
-      message: 'Contact d\'urgence mis à jour avec succès'
-    });
+    res.json({ success: true, data: user, message: 'Contact d\'urgence mis à jour avec succès' });
 
   } catch (error) {
     console.error('❌ Erreur updateEmergencyContact:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la mise à jour du contact d\'urgence'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de la mise à jour du contact d\'urgence' });
   }
 };
 
 // ============================================
-// ✅ NOUVELLES MÉTHODES POUR L'HISTORIQUE ET EXPORT
+// HISTORIQUE & EXPORT
 // ============================================
 
-/**
- * GET /api/profile/login-history
- * Récupérer l'historique des connexions
- */
 exports.getLoginHistory = async (req, res) => {
   try {
     const logs = await AuditLog.findAll({
       where: {
         userId: req.user.id,
-        action: {
-          [Op.in]: ['USER_LOGIN', 'ADMIN_LOGIN', 'PASSWORD_CHANGED']
-        }
+        action: { [Op.in]: ['USER_LOGIN', 'ADMIN_LOGIN', 'PASSWORD_CHANGED'] }
       },
       order: [['createdAt', 'DESC']],
       limit: 50
     });
-
-    res.json({
-      success: true,
-      data: logs
-    });
-
+    res.json({ success: true, data: logs });
   } catch (error) {
     console.error('❌ Erreur getLoginHistory:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la récupération de l\'historique'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de la récupération de l\'historique' });
   }
 };
 
-/**
- * POST /api/profile/deactivate
- * Désactiver le compte
- */
 exports.deactivateAccount = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
-
     await user.update({ isActive: false });
 
-    // Log d'audit
-    await AuditLog.create({
-      action: 'ACCOUNT_DEACTIVATED',
-      userId: user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
-    });
+    try {
+      await AuditLog.create({
+        action: 'ACCOUNT_DEACTIVATED',
+        userId: user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+    } catch (e) { console.warn('⚠️ Audit log:', e.message); }
 
-    res.json({
-      success: true,
-      message: 'Compte désactivé avec succès'
-    });
+    res.json({ success: true, message: 'Compte désactivé avec succès' });
 
   } catch (error) {
     console.error('❌ Erreur deactivateAccount:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de la désactivation du compte'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de la désactivation du compte' });
   }
 };
 
-/**
- * GET /api/profile/export-data
- * Exporter toutes les données personnelles
- */
 exports.exportPersonalData = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
@@ -561,17 +436,13 @@ exports.exportPersonalData = async (req, res) => {
 
     const appointments = await Appointment.findAll({
       where: { patientId: req.user.id },
-      include: [
-        { model: User, as: 'doctor', attributes: ['id', 'firstName', 'lastName', 'specialty'] }
-      ],
+      include: [{ model: User, as: 'doctor', attributes: ['id', 'firstName', 'lastName', 'specialty'] }],
       order: [['appointmentDate', 'DESC']]
     });
 
     const medicalFiles = await MedicalFile.findAll({
       where: { patientId: req.user.id },
-      include: [
-        { model: User, as: 'doctor', attributes: ['id', 'firstName', 'lastName'] }
-      ],
+      include: [{ model: User, as: 'doctor', attributes: ['id', 'firstName', 'lastName'] }],
       order: [['consultationDate', 'DESC']]
     });
 
@@ -633,9 +504,6 @@ exports.exportPersonalData = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Erreur exportPersonalData:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erreur lors de l\'export des données'
-    });
+    res.status(500).json({ success: false, message: 'Erreur lors de l\'export des données' });
   }
 };
