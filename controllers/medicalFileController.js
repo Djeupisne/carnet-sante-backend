@@ -1,7 +1,10 @@
 const { MedicalFile, User, AuditLog } = require('../models');
 const { validationService } = require('../services/validationService');
-const { encryptionService } = require('../services/encryptionService');
 const { sequelize } = require('../config/database');
+
+// ============================================
+// CRÉER UN DOSSIER MÉDICAL
+// ============================================
 
 exports.createMedicalRecord = async (req, res) => {
   try {
@@ -38,10 +41,9 @@ exports.createMedicalRecord = async (req, res) => {
       });
     }
 
-    // Créer le dossier médical
     const medicalFile = await MedicalFile.create({
       patientId,
-      doctorId: req.user.id, // Le médecin connecté
+      doctorId: req.user.id,
       recordType,
       title,
       description,
@@ -60,17 +62,17 @@ exports.createMedicalRecord = async (req, res) => {
     });
 
     // Log d'audit
-    await AuditLog.create({
-      action: 'MEDICAL_RECORD_CREATED',
-      userId: req.user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-      details: {
-        medicalFileId: medicalFile.id,
-        patientId,
-        recordType
-      }
-    });
+    try {
+      await AuditLog.create({
+        action: 'MEDICAL_RECORD_CREATED',
+        userId: req.user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        details: { medicalFileId: medicalFile.id, patientId, recordType }
+      });
+    } catch (auditError) {
+      console.warn('⚠️ Erreur audit log:', auditError.message);
+    }
 
     res.status(201).json({
       success: true,
@@ -79,18 +81,25 @@ exports.createMedicalRecord = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur lors de la création du dossier médical:', error);
+    console.error('❌ Erreur createMedicalRecord:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur interne du serveur'
+      message: 'Erreur interne du serveur',
+      error: error.message
     });
   }
 };
+
+// ============================================
+// RÉCUPÉRER LES DOSSIERS D'UN PATIENT
+// ============================================
 
 exports.getPatientMedicalFiles = async (req, res) => {
   try {
     const { patientId } = req.params;
     const { page = 1, limit = 20, recordType } = req.query;
+
+    console.log(`📁 Récupération des dossiers médicaux pour le patient ${patientId}...`);
 
     // Vérifier les permissions
     if (req.user.role === 'patient' && req.user.id !== patientId) {
@@ -100,13 +109,12 @@ exports.getPatientMedicalFiles = async (req, res) => {
       });
     }
 
-    // Construire la requête
     const whereClause = { patientId };
     if (recordType) {
       whereClause.recordType = recordType;
     }
 
-    const offset = (page - 1) * limit;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const { count, rows: medicalFiles } = await MedicalFile.findAndCountAll({
       where: whereClause,
@@ -119,24 +127,27 @@ exports.getPatientMedicalFiles = async (req, res) => {
       ],
       order: [['consultationDate', 'DESC']],
       limit: parseInt(limit),
-      offset: parseInt(offset)
+      offset
     });
 
-    // Log d'accès
-    await MedicalFile.update(
-      {
-        accessLog: sequelize.fn(
-          'array_append',
-          sequelize.col('accessLog'),
-          {
-            userId: req.user.id,
-            action: 'READ',
-            timestamp: new Date()
-          }
-        )
-      },
-      { where: { patientId } }
-    );
+    // ✅ CORRECTION : Log d'accès simplifié sans sequelize.fn qui causait le 500
+    // On met à jour chaque fichier individuellement pour éviter l'erreur array_append
+    try {
+      for (const file of medicalFiles) {
+        const currentLog = Array.isArray(file.accessLog) ? file.accessLog : [];
+        await file.update({
+          accessLog: [
+            ...currentLog,
+            { userId: req.user.id, action: 'READ', timestamp: new Date() }
+          ]
+        });
+      }
+    } catch (logError) {
+      // Ne pas bloquer la réponse si le log échoue
+      console.warn('⚠️ Erreur log accès:', logError.message);
+    }
+
+    console.log(`✅ ${medicalFiles.length} dossiers médicaux trouvés pour le patient ${patientId}`);
 
     res.json({
       success: true,
@@ -144,20 +155,25 @@ exports.getPatientMedicalFiles = async (req, res) => {
         medicalFiles,
         pagination: {
           current: parseInt(page),
-          total: Math.ceil(count / limit),
+          total: Math.ceil(count / parseInt(limit)),
           totalRecords: count
         }
       }
     });
 
   } catch (error) {
-    console.error('Erreur lors de la récupération des dossiers médicaux:', error);
+    console.error('❌ Erreur getPatientMedicalFiles:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur interne du serveur'
+      message: 'Erreur interne du serveur',
+      error: error.message
     });
   }
 };
+
+// ============================================
+// RÉCUPÉRER UN DOSSIER PAR ID
+// ============================================
 
 exports.getMedicalFileById = async (req, res) => {
   try {
@@ -194,16 +210,17 @@ exports.getMedicalFileById = async (req, res) => {
     }
 
     // Log d'accès
-    await medicalFile.update({
-      accessLog: [
-        ...medicalFile.accessLog,
-        {
-          userId: req.user.id,
-          action: 'READ_DETAIL',
-          timestamp: new Date()
-        }
-      ]
-    });
+    try {
+      const currentLog = Array.isArray(medicalFile.accessLog) ? medicalFile.accessLog : [];
+      await medicalFile.update({
+        accessLog: [
+          ...currentLog,
+          { userId: req.user.id, action: 'READ_DETAIL', timestamp: new Date() }
+        ]
+      });
+    } catch (logError) {
+      console.warn('⚠️ Erreur log accès:', logError.message);
+    }
 
     res.json({
       success: true,
@@ -211,13 +228,18 @@ exports.getMedicalFileById = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur lors de la récupération du dossier médical:', error);
+    console.error('❌ Erreur getMedicalFileById:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur interne du serveur'
+      message: 'Erreur interne du serveur',
+      error: error.message
     });
   }
 };
+
+// ============================================
+// METTRE À JOUR UN DOSSIER MÉDICAL
+// ============================================
 
 exports.updateMedicalFile = async (req, res) => {
   try {
@@ -232,7 +254,7 @@ exports.updateMedicalFile = async (req, res) => {
       });
     }
 
-    // Seul le médecin créateur peut modifier
+    // Seul le médecin créateur ou un admin peut modifier
     if (medicalFile.doctorId !== req.user.id && req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -253,16 +275,17 @@ exports.updateMedicalFile = async (req, res) => {
     await medicalFile.update(updates);
 
     // Log d'audit
-    await AuditLog.create({
-      action: 'MEDICAL_RECORD_UPDATED',
-      userId: req.user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-      details: {
-        medicalFileId: id,
-        updates
-      }
-    });
+    try {
+      await AuditLog.create({
+        action: 'MEDICAL_RECORD_UPDATED',
+        userId: req.user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        details: { medicalFileId: id, updates }
+      });
+    } catch (auditError) {
+      console.warn('⚠️ Erreur audit log:', auditError.message);
+    }
 
     res.json({
       success: true,
@@ -271,13 +294,18 @@ exports.updateMedicalFile = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur lors de la mise à jour du dossier médical:', error);
+    console.error('❌ Erreur updateMedicalFile:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur interne du serveur'
+      message: 'Erreur interne du serveur',
+      error: error.message
     });
   }
 };
+
+// ============================================
+// SUPPRIMER UN DOSSIER MÉDICAL
+// ============================================
 
 exports.deleteMedicalFile = async (req, res) => {
   try {
@@ -302,15 +330,17 @@ exports.deleteMedicalFile = async (req, res) => {
     await medicalFile.destroy();
 
     // Log d'audit
-    await AuditLog.create({
-      action: 'MEDICAL_RECORD_DELETED',
-      userId: req.user.id,
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent'),
-      details: {
-        medicalFileId: id
-      }
-    });
+    try {
+      await AuditLog.create({
+        action: 'MEDICAL_RECORD_DELETED',
+        userId: req.user.id,
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+        details: { medicalFileId: id }
+      });
+    } catch (auditError) {
+      console.warn('⚠️ Erreur audit log:', auditError.message);
+    }
 
     res.json({
       success: true,
@@ -318,10 +348,11 @@ exports.deleteMedicalFile = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Erreur lors de la suppression du dossier médical:', error);
+    console.error('❌ Erreur deleteMedicalFile:', error);
     res.status(500).json({
       success: false,
-      message: 'Erreur interne du serveur'
+      message: 'Erreur interne du serveur',
+      error: error.message
     });
   }
 };
