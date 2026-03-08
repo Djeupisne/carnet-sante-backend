@@ -2,10 +2,9 @@ const { sequelize } = require('../config/database');
 const { Sequelize, DataTypes, Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
-const DoctorPayment = require('./DoctorPayment');
 const db = {};
 
-// ✅ LISTE DES FICHIERS DE MODÈLES (MISE À JOUR AVEC PRESCRIPTION, VIDEOCALL ET DOCTORPAYMENT)
+// ✅ LISTE DES FICHIERS DE MODÈLES
 const modelFiles = [
   'MedicalFile.js',
   'Payment.js',
@@ -17,25 +16,20 @@ const modelFiles = [
   'Calendar.js',
   'Prescription.js',
   'VideoCall.js',
-  'DoctorPayment.js'  // NOUVEAU MODÈLE AJOUTÉ
+  'DoctorPayment.js'
 ];
 
-// ✅ AJOUTER LE MODÈLE DOCTORPAYMENT DIRECTEMENT DANS DB
-if (DoctorPayment && DoctorPayment.name) {
-  db[DoctorPayment.name] = DoctorPayment;
-  console.log(`✅ Modèle chargé directement: ${DoctorPayment.name}`);
-}
-
-// ✅ CHARGER CHAQUE MODÈLE DIRECTEMENT
+// ✅ CHARGER CHAQUE MODÈLE
 modelFiles.forEach(file => {
   try {
     const modelPath = path.join(__dirname, file);
-    
     if (fs.existsSync(modelPath)) {
       const model = require(modelPath);
-      
       if (model && model.name) {
-        db[model.name] = model;
+        // Évite d'écraser si déjà chargé (cas DoctorPayment)
+        if (!db[model.name]) {
+          db[model.name] = model;
+        }
         console.log(`✅ Modèle chargé: ${model.name}`);
       } else {
         console.warn(`⚠️ ${file} n'a pas de propriété 'name'`);
@@ -53,8 +47,11 @@ modelFiles.forEach(file => {
 
 // ✅ CRÉATION DYNAMIQUE DES MODÈLES
 function createModelDynamically(modelName) {
+  // Ne pas écraser un modèle déjà chargé depuis fichier
+  if (db[modelName]) return;
+
   console.log(`🔄 Création dynamique du modèle ${modelName}...`);
-  
+
   let attributes = {
     id: {
       type: DataTypes.UUID,
@@ -62,13 +59,13 @@ function createModelDynamically(modelName) {
       primaryKey: true
     }
   };
-  
+
   let options = {
     tableName: `${modelName}s`,
     indexes: []
   };
 
-  switch(modelName) {
+  switch (modelName) {
     case 'User':
       attributes = {
         ...attributes,
@@ -83,7 +80,7 @@ function createModelDynamically(modelName) {
         password: DataTypes.STRING
       };
       break;
-      
+
     case 'Appointment':
       attributes = {
         ...attributes,
@@ -91,11 +88,11 @@ function createModelDynamically(modelName) {
         doctorId: { type: DataTypes.UUID, allowNull: false },
         appointmentDate: { type: DataTypes.DATE, allowNull: false },
         duration: { type: DataTypes.INTEGER, defaultValue: 30 },
-        status: { 
+        status: {
           type: DataTypes.ENUM('pending', 'confirmed', 'completed', 'cancelled', 'no_show'),
           defaultValue: 'pending'
         },
-        type: { 
+        type: {
           type: DataTypes.ENUM('in_person', 'teleconsultation', 'home_visit'),
           defaultValue: 'in_person'
         },
@@ -110,7 +107,7 @@ function createModelDynamically(modelName) {
         { fields: ['status'] }
       ];
       break;
-      
+
     case 'Notification':
       attributes = {
         ...attributes,
@@ -120,7 +117,7 @@ function createModelDynamically(modelName) {
         message: { type: DataTypes.TEXT, allowNull: false },
         data: { type: DataTypes.JSONB, defaultValue: {} },
         isRead: { type: DataTypes.BOOLEAN, defaultValue: false },
-        priority: { 
+        priority: {
           type: DataTypes.ENUM('low', 'medium', 'high', 'urgent'),
           defaultValue: 'medium'
         },
@@ -133,7 +130,7 @@ function createModelDynamically(modelName) {
         { fields: ['scheduledFor'] }
       ];
       break;
-      
+
     case 'Calendar':
       attributes = {
         ...attributes,
@@ -147,7 +144,7 @@ function createModelDynamically(modelName) {
         { unique: true, fields: ['doctorId', 'date'] }
       ];
       break;
-      
+
     case 'MedicalFile':
       attributes = {
         ...attributes,
@@ -162,7 +159,7 @@ function createModelDynamically(modelName) {
         consultationDate: { type: DataTypes.DATE, allowNull: false }
       };
       break;
-      
+
     case 'Payment':
       attributes = {
         ...attributes,
@@ -171,7 +168,7 @@ function createModelDynamically(modelName) {
         doctorId: { type: DataTypes.UUID, allowNull: false },
         amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
         currency: { type: DataTypes.STRING, defaultValue: 'EUR' },
-        status: { 
+        status: {
           type: DataTypes.ENUM('pending', 'completed', 'failed', 'refunded'),
           defaultValue: 'pending'
         },
@@ -180,19 +177,16 @@ function createModelDynamically(modelName) {
         paymentDate: DataTypes.DATE
       };
       break;
-      
+
     case 'AuditLog':
       attributes = {
         ...attributes,
-        userId: { 
+        userId: {
           type: DataTypes.UUID,
           allowNull: true,
-          references: {
-            model: 'Users',
-            key: 'id'
-          }
+          references: { model: 'Users', key: 'id' }
         },
-        userRole: { 
+        userRole: {
           type: DataTypes.ENUM('patient', 'doctor', 'admin', 'hospital_admin'),
           allowNull: true
         },
@@ -202,14 +196,14 @@ function createModelDynamically(modelName) {
         resource: DataTypes.STRING,
         resourceId: DataTypes.UUID,
         details: DataTypes.JSONB,
-        status: { 
+        status: {
           type: DataTypes.ENUM('success', 'failure'),
           defaultValue: 'success'
         },
         errorMessage: DataTypes.TEXT
       };
       break;
-      
+
     case 'Review':
       attributes = {
         ...attributes,
@@ -232,7 +226,7 @@ function createModelDynamically(modelName) {
         notes: DataTypes.TEXT,
         issueDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
         expiryDate: DataTypes.DATE,
-        status: { 
+        status: {
           type: DataTypes.ENUM('active', 'filled', 'expired', 'cancelled'),
           defaultValue: 'active'
         },
@@ -253,77 +247,61 @@ function createModelDynamically(modelName) {
     case 'VideoCall':
       attributes = {
         ...attributes,
-        appointmentId: { type: DataTypes.UUID, allowNull: false, unique: true },
+        appointmentId: { type: DataTypes.UUID, allowNull: true },
         patientId: { type: DataTypes.UUID, allowNull: false },
         doctorId: { type: DataTypes.UUID, allowNull: false },
-        roomName: { type: DataTypes.STRING, allowNull: false, unique: true },
+        roomName: { type: DataTypes.STRING, allowNull: true },
+        roomLink: { type: DataTypes.STRING, allowNull: true },
         roomSid: DataTypes.STRING,
-        status: { 
+        status: {
           type: DataTypes.ENUM('scheduled', 'active', 'completed', 'missed', 'cancelled'),
           defaultValue: 'scheduled'
         },
-        scheduledStartTime: { type: DataTypes.DATE, allowNull: false },
+        scheduledStartTime: { type: DataTypes.DATE, allowNull: true },
         actualStartTime: DataTypes.DATE,
         actualEndTime: DataTypes.DATE,
         duration: DataTypes.INTEGER,
         recordingUrl: DataTypes.STRING,
-        recordingSid: DataTypes.STRING,
-        recordingStatus: { 
-          type: DataTypes.ENUM('none', 'requested', 'in_progress', 'completed', 'failed'),
-          defaultValue: 'none'
-        },
-        participants: { type: DataTypes.JSONB, defaultValue: [] },
         meetingUrl: DataTypes.STRING,
-        joinToken: DataTypes.TEXT,
         endedBy: DataTypes.UUID,
         endReason: DataTypes.STRING,
-        quality: { 
-          type: DataTypes.ENUM('excellent', 'good', 'fair', 'poor'),
-        },
         notes: DataTypes.TEXT,
         recordingConsent: { type: DataTypes.BOOLEAN, defaultValue: false }
       };
       options.indexes = [
-        { fields: ['appointmentId'], unique: true },
         { fields: ['patientId'] },
         { fields: ['doctorId'] },
-        { fields: ['status'] },
-        { fields: ['scheduledStartTime'] },
-        { fields: ['roomName'], unique: true }
+        { fields: ['status'] }
       ];
       break;
 
-    case 'DoctorPayment':  // NOUVEAU MODÈLE DYNAMIQUE DOCTORPAYMENT
+    // ✅ DOCTORPAYMENT — schéma nouveau (versements admin → médecin)
+    case 'DoctorPayment':
       attributes = {
         ...attributes,
-        doctorId: { type: DataTypes.UUID, allowNull: false },
-        appointmentId: { type: DataTypes.UUID, allowNull: false },
-        patientId: { type: DataTypes.UUID, allowNull: false },
-        amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
-        platformFee: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
-        doctorAmount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
-        currency: { type: DataTypes.STRING, defaultValue: 'EUR' },
-        status: { 
-          type: DataTypes.ENUM('pending', 'processed', 'paid', 'failed', 'cancelled'),
+        doctorId:    { type: DataTypes.UUID, allowNull: false },
+        processedBy: { type: DataTypes.UUID, allowNull: false },
+        amount:      { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+        currency:    { type: DataTypes.STRING(10), defaultValue: 'XOF' },
+        paymentMethod: {
+          type: DataTypes.ENUM('bank_transfer', 'mobile_money', 'cash', 'check'),
+          allowNull: false
+        },
+        paymentDetails:    { type: DataTypes.JSONB, defaultValue: {} },
+        period:            { type: DataTypes.STRING, allowNull: true },
+        consultationsCount:{ type: DataTypes.INTEGER, defaultValue: 0 },
+        status: {
+          type: DataTypes.ENUM('pending', 'processing', 'completed', 'failed'),
           defaultValue: 'pending'
         },
-        paymentMethod: { type: DataTypes.STRING },
-        transactionId: { type: DataTypes.STRING, unique: true },
-        paymentDate: DataTypes.DATE,
-        processedDate: DataTypes.DATE,
-        paidDate: DataTypes.DATE,
-        bankAccount: DataTypes.JSONB,
-        transferReference: DataTypes.STRING,
-        notes: DataTypes.TEXT,
-        invoiceUrl: DataTypes.STRING,
-        receiptUrl: DataTypes.STRING
+        notes:       { type: DataTypes.TEXT, allowNull: true },
+        processedAt: { type: DataTypes.DATE, allowNull: true }
       };
+      options.tableName = 'DoctorPayments';
       options.indexes = [
         { fields: ['doctorId'] },
-        { fields: ['appointmentId'], unique: true },
-        { fields: ['patientId'] },
         { fields: ['status'] },
-        { fields: ['paymentDate'] }
+        { fields: ['processedBy'] }
       ];
       break;
   }
@@ -331,15 +309,18 @@ function createModelDynamically(modelName) {
   const Model = sequelize.define(modelName, attributes, {
     ...options,
     timestamps: true,
-    paranoid: modelName === 'User' ? true : false
+    paranoid: modelName === 'User'
   });
-  
+
   db[Model.name] = Model;
   console.log(`✅ Modèle ${modelName} créé dynamiquement`);
 }
 
-// ✅ VÉRIFIER LES MODÈLES CRITIQUES (MISE À JOUR AVEC DOCTORPAYMENT)
-const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment', 'AuditLog', 'Prescription', 'VideoCall', 'DoctorPayment'];
+// ✅ VÉRIFIER LES MODÈLES CRITIQUES
+const criticalModels = [
+  'User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile',
+  'Payment', 'AuditLog', 'Prescription', 'VideoCall', 'DoctorPayment'
+];
 criticalModels.forEach(modelName => {
   if (!db[modelName]) {
     createModelDynamically(modelName);
@@ -353,9 +334,9 @@ function setupAssociations() {
   // User ↔ Appointment
   if (db.User && db.Appointment) {
     db.User.hasMany(db.Appointment, { as: 'patientAppointments', foreignKey: 'patientId' });
-    db.User.hasMany(db.Appointment, { as: 'doctorAppointments', foreignKey: 'doctorId' });
+    db.User.hasMany(db.Appointment, { as: 'doctorAppointments',  foreignKey: 'doctorId'  });
     db.Appointment.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
-    db.Appointment.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+    db.Appointment.belongsTo(db.User, { as: 'doctor',  foreignKey: 'doctorId'  });
     console.log('✅ Associations User-Appointment');
   }
 
@@ -363,7 +344,7 @@ function setupAssociations() {
   if (db.User && db.MedicalFile) {
     db.User.hasMany(db.MedicalFile, { as: 'medicalFiles', foreignKey: 'patientId' });
     db.MedicalFile.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
-    db.MedicalFile.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+    db.MedicalFile.belongsTo(db.User, { as: 'doctor',  foreignKey: 'doctorId'  });
     console.log('✅ Associations User-MedicalFile');
   }
 
@@ -388,223 +369,114 @@ function setupAssociations() {
     console.log('✅ Associations User-Calendar');
   }
 
-  // User ↔ Payment
+  // User ↔ Payment (paiements de consultation)
   if (db.User && db.Payment) {
     db.User.hasMany(db.Payment, { as: 'patientPayments', foreignKey: 'patientId' });
-    db.User.hasMany(db.Payment, { as: 'doctorPayments', foreignKey: 'doctorId' });
+    db.User.hasMany(db.Payment, { as: 'doctorPayments',  foreignKey: 'doctorId'  }); // ← alias 'doctorPayments' réservé à Payment
     db.Payment.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
-    db.Payment.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+    db.Payment.belongsTo(db.User, { as: 'doctor',  foreignKey: 'doctorId'  });
     console.log('✅ Associations User-Payment');
   }
 
   // User ↔ Review
   if (db.User && db.Review) {
     db.User.hasMany(db.Review, { as: 'reviews', foreignKey: 'doctorId' });
-    db.Review.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+    db.Review.belongsTo(db.User, { as: 'doctor',  foreignKey: 'doctorId'  });
     db.Review.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
     console.log('✅ Associations User-Review');
   }
 
   // User ↔ AuditLog (sans contrainte)
   if (db.User && db.AuditLog) {
-    db.User.hasMany(db.AuditLog, { 
-      as: 'auditLogs', 
-      foreignKey: 'userId',
-      constraints: false
-    });
-    
-    db.AuditLog.belongsTo(db.User, { 
-      as: 'user', 
-      foreignKey: 'userId',
-      constraints: false
-    });
-    
+    db.User.hasMany(db.AuditLog, { as: 'auditLogs', foreignKey: 'userId', constraints: false });
+    db.AuditLog.belongsTo(db.User, { as: 'user', foreignKey: 'userId', constraints: false });
     console.log('✅ Associations User-AuditLog (sans contrainte)');
   }
 
-  // ============================================
-  // ASSOCIATIONS POUR Prescription
-  // ============================================
-  
-  // Prescription ↔ User (Patient)
+  // ── Prescription ──────────────────────────────────────────────────────────
   if (db.Prescription && db.User) {
     db.Prescription.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
+    db.Prescription.belongsTo(db.User, { as: 'doctor',  foreignKey: 'doctorId'  });
     db.User.hasMany(db.Prescription, { as: 'patientPrescriptions', foreignKey: 'patientId' });
-    console.log('✅ Associations Prescription-Patient');
+    db.User.hasMany(db.Prescription, { as: 'doctorPrescriptions',  foreignKey: 'doctorId'  });
+    console.log('✅ Associations Prescription-User');
   }
-
-  // Prescription ↔ User (Doctor)
-  if (db.Prescription && db.User) {
-    db.Prescription.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
-    db.User.hasMany(db.Prescription, { as: 'doctorPrescriptions', foreignKey: 'doctorId' });
-    console.log('✅ Associations Prescription-Doctor');
-  }
-
-  // Prescription ↔ Appointment
   if (db.Prescription && db.Appointment) {
     db.Prescription.belongsTo(db.Appointment, { as: 'appointment', foreignKey: 'appointmentId' });
     db.Appointment.hasMany(db.Prescription, { as: 'prescriptions', foreignKey: 'appointmentId' });
     console.log('✅ Associations Prescription-Appointment');
   }
 
-  // ============================================
-  // ASSOCIATIONS POUR VideoCall
-  // ============================================
-  
-  // VideoCall ↔ Appointment
+  // ── VideoCall ─────────────────────────────────────────────────────────────
   if (db.VideoCall && db.Appointment) {
     db.VideoCall.belongsTo(db.Appointment, { as: 'appointment', foreignKey: 'appointmentId' });
     db.Appointment.hasOne(db.VideoCall, { as: 'videoCall', foreignKey: 'appointmentId' });
     console.log('✅ Associations VideoCall-Appointment');
   }
-
-  // VideoCall ↔ User (Patient)
   if (db.VideoCall && db.User) {
-    db.VideoCall.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
+    db.VideoCall.belongsTo(db.User, { as: 'patient',      foreignKey: 'patientId' });
+    db.VideoCall.belongsTo(db.User, { as: 'doctor',       foreignKey: 'doctorId'  });
+    db.VideoCall.belongsTo(db.User, { as: 'endedByUser',  foreignKey: 'endedBy'   });
     db.User.hasMany(db.VideoCall, { as: 'patientVideoCalls', foreignKey: 'patientId' });
-    console.log('✅ Associations VideoCall-Patient');
+    db.User.hasMany(db.VideoCall, { as: 'doctorVideoCalls',  foreignKey: 'doctorId'  });
+    console.log('✅ Associations VideoCall-User');
   }
 
-  // VideoCall ↔ User (Doctor)
-  if (db.VideoCall && db.User) {
-    db.VideoCall.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
-    db.User.hasMany(db.VideoCall, { as: 'doctorVideoCalls', foreignKey: 'doctorId' });
-    console.log('✅ Associations VideoCall-Doctor');
-  }
-
-  // VideoCall ↔ User (EndedBy)
-  if (db.VideoCall && db.User) {
-    db.VideoCall.belongsTo(db.User, { as: 'endedByUser', foreignKey: 'endedBy' });
-    console.log('✅ Associations VideoCall-EndedBy');
-  }
-
-  // ============================================
-  // ASSOCIATIONS POUR DoctorPayment (NOUVELLES)
-  // ============================================
-  
-  // DoctorPayment ↔ User (Doctor)
+  // ── DoctorPayment (versements admin → médecin) ───────────────────────────
+  // ⚠️ ALIAS DIFFÉRENTS de Payment pour éviter les conflits :
+  //    'doctorSalaries'    ≠ 'doctorPayments' (Payment)
+  //    'processedSalaries' pour la FK processedBy
   if (db.DoctorPayment && db.User) {
-    db.DoctorPayment.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
-    db.User.hasMany(db.DoctorPayment, { as: 'doctorPayments', foreignKey: 'doctorId' });
-    console.log('✅ Associations DoctorPayment-Doctor');
-  }
-
-  // DoctorPayment ↔ User (Patient)
-  if (db.DoctorPayment && db.User) {
-    db.DoctorPayment.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
-    db.User.hasMany(db.DoctorPayment, { as: 'patientDoctorPayments', foreignKey: 'patientId' });
-    console.log('✅ Associations DoctorPayment-Patient');
-  }
-
-  // DoctorPayment ↔ Appointment
-  if (db.DoctorPayment && db.Appointment) {
-    db.DoctorPayment.belongsTo(db.Appointment, { as: 'appointment', foreignKey: 'appointmentId' });
-    db.Appointment.hasOne(db.DoctorPayment, { as: 'doctorPayment', foreignKey: 'appointmentId' });
-    console.log('✅ Associations DoctorPayment-Appointment');
-  }
-
-  // DoctorPayment ↔ Payment (optionnel)
-  if (db.DoctorPayment && db.Payment) {
-    db.DoctorPayment.belongsTo(db.Payment, { as: 'payment', foreignKey: 'paymentId' });
-    db.Payment.hasOne(db.DoctorPayment, { as: 'doctorPayment', foreignKey: 'paymentId' });
-    console.log('✅ Associations DoctorPayment-Payment');
+    db.DoctorPayment.belongsTo(db.User, { as: 'doctor',    foreignKey: 'doctorId'    });
+    db.DoctorPayment.belongsTo(db.User, { as: 'processor', foreignKey: 'processedBy' });
+    db.User.hasMany(db.DoctorPayment, { as: 'doctorSalaries',    foreignKey: 'doctorId'    }); // ✅ alias unique
+    db.User.hasMany(db.DoctorPayment, { as: 'processedSalaries', foreignKey: 'processedBy' }); // ✅ alias unique
+    console.log('✅ Associations DoctorPayment-User');
   }
 }
 
 // Exécuter les associations
+// ✅ PAS d'appel à DoctorPayment.associate(db) — les associations sont déjà
+//    définies dans setupAssociations() ci-dessus pour éviter les doublons.
 setupAssociations();
 
-// ✅ APPEL DE L'ASSOCIATION DOCTORPAYMENT SI ELLE EXISTE (DEMANDE SPÉCIFIQUE)
-if (DoctorPayment && typeof DoctorPayment.associate === 'function') {
-  DoctorPayment.associate(db);
-  console.log('✅ Association DoctorPayment.associate() appelée');
-}
-
-// ✅ SUPPRESSION DE LA CONTRAINTE AVEC SQL DIRECT (SOLUTION ROBUSTE)
+// ✅ SUPPRESSION DE LA CONTRAINTE AVEC SQL DIRECT
 async function removeForeignKeyConstraint() {
   try {
     console.log('🔍 Vérification des contraintes sur AuditLogs...');
-    
-    // Vérifier si la contrainte existe
     const constraints = await sequelize.query(
-      `SELECT conname 
-       FROM pg_constraint 
-       WHERE conrelid = 'AuditLogs'::regclass 
-       AND conname = 'AuditLogs_userId_fkey'`,
+      `SELECT conname FROM pg_constraint WHERE conrelid = 'AuditLogs'::regclass AND conname = 'AuditLogs_userId_fkey'`,
       { type: sequelize.QueryTypes.SELECT }
     );
-    
     if (constraints.length > 0) {
-      console.log('🗑️ Suppression de la contrainte AuditLogs_userId_fkey avec SQL direct...');
-      
-      // Utiliser SQL direct au lieu de queryInterface
-      await sequelize.query(
-        `ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey";`
-      );
-      
-      console.log('✅ Contrainte supprimée avec succès via SQL direct');
-      
-      // Vérifier que la contrainte a bien été supprimée
-      const checkAfter = await sequelize.query(
-        `SELECT conname 
-         FROM pg_constraint 
-         WHERE conrelid = 'AuditLogs'::regclass 
-         AND conname = 'AuditLogs_userId_fkey'`,
-        { type: sequelize.QueryTypes.SELECT }
-      );
-      
-      if (checkAfter.length === 0) {
-        console.log('✅ Vérification: contrainte bien supprimée');
-      } else {
-        console.log('⚠️ La contrainte existe toujours, tentative avec CASCADE...');
-        await sequelize.query(
-          `ALTER TABLE "AuditLogs" DROP CONSTRAINT "AuditLogs_userId_fkey" CASCADE;`
-        );
-        console.log('✅ Contrainte supprimée avec CASCADE');
-      }
+      await sequelize.query(`ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey";`);
+      console.log('✅ Contrainte AuditLogs_userId_fkey supprimée');
     } else {
-      console.log('✅ La contrainte AuditLogs_userId_fkey n\'existe pas');
+      console.log('✅ Contrainte AuditLogs_userId_fkey absente (OK)');
     }
   } catch (error) {
-    console.log('⚠️ Erreur lors de la suppression de la contrainte (ignorée):', error.message);
-    
-    // Dernière tentative avec CASCADE
+    console.log('⚠️ removeForeignKeyConstraint (ignoré):', error.message);
     try {
-      console.log('🔄 Dernière tentative avec CASCADE...');
-      await sequelize.query(
-        `ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey" CASCADE;`
-      );
-      console.log('✅ Contrainte supprimée avec CASCADE');
+      await sequelize.query(`ALTER TABLE "AuditLogs" DROP CONSTRAINT IF EXISTS "AuditLogs_userId_fkey" CASCADE;`);
     } catch (e) {
       console.log('⚠️ Échec final (ignoré):', e.message);
     }
   }
 }
 
-// ✅ SYNCHRONISATION SANS ALTER
+// ✅ SYNCHRONISATION
 const syncModels = async () => {
   try {
-    await sequelize.sync({ 
-      alter: false,
-      force: false,
-      logging: false
-    });
+    await sequelize.sync({ alter: false, force: false, logging: false });
     console.log('✅ Modèles synchronisés avec la base de données');
-    
-    // Supprimer la contrainte après synchronisation
     await removeForeignKeyConstraint();
-    
     return true;
   } catch (error) {
     console.error('❌ Erreur synchronisation:', error.message);
-    
     try {
       await sequelize.sync({ force: false, logging: false });
       console.log('✅ Synchronisation mode secours réussie');
-      
-      // Supprimer la contrainte après synchronisation
       await removeForeignKeyConstraint();
-      
       return true;
     } catch (e) {
       console.error('❌ Échec synchronisation:', e.message);
