@@ -172,6 +172,7 @@ app.use('/api/medical-files', require('./routes/medicalFile'));
 app.use('/api/appointments', require('./routes/appointment'));
 app.use('/api/payments', require('./routes/payment'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/admin', require('./routes/adminExtended'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/calendars', require('./routes/calendar'));
@@ -461,6 +462,15 @@ try {
   }
 } catch (prescError) {
   console.error('❌ Erreur synchronisation Prescription/VideoCall:', prescError.message);
+}
+      try {
+  const { DoctorPayment } = require('./models');
+  if (DoctorPayment) {
+    await DoctorPayment.sync({ alter: true, logging: false });
+    console.log('✅ Modèle DoctorPayment synchronisé');
+  }
+} catch (e) {
+  console.error('❌ Erreur DoctorPayment sync:', e.message);
 }
       console.log('✅ Tous les modèles sont prêts');
 
