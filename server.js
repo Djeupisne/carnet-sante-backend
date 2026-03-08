@@ -178,6 +178,16 @@ app.use('/api/calendars', require('./routes/calendar'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/doctors', require('./routes/doctors'));
 
+// NOUVELLES ROUTES AJOUTÉES
+const prescriptionRoutes = require('./routes/prescriptions');
+const videoCallRoutes    = require('./routes/videoCalls');
+
+app.use('/api/prescriptions', prescriptionRoutes);
+app.use('/api/video-calls',   videoCallRoutes);
+// ============================================
+// FIN DES NOUVELLES ROUTES
+// ============================================
+
 // ============================================
 // ROUTES SYSTÈME
 // ============================================
@@ -236,7 +246,9 @@ app.get('/', (req, res) => {
       notifications: '/api/notifications',
       users: '/api/users',
       calendars: '/api/calendars',
-      doctors: '/api/doctors'
+      doctors: '/api/doctors',
+      prescriptions: '/api/prescriptions', // Nouveau endpoint
+      videoCalls: '/api/video-calls'        // Nouveau endpoint
     }
   });
 });
