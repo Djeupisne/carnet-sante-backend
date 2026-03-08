@@ -2,10 +2,10 @@ const { sequelize } = require('../config/database');
 const { Sequelize, DataTypes, Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
-
+const DoctorPayment = require('./DoctorPayment');
 const db = {};
 
-// ✅ LISTE DES FICHIERS DE MODÈLES (MISE À JOUR AVEC PRESCRIPTION ET VIDEOCALL)
+// ✅ LISTE DES FICHIERS DE MODÈLES (MISE À JOUR AVEC PRESCRIPTION, VIDEOCALL ET DOCTORPAYMENT)
 const modelFiles = [
   'MedicalFile.js',
   'Payment.js',
@@ -15,9 +15,16 @@ const modelFiles = [
   'AuditLog.js',
   'Review.js',
   'Calendar.js',
-  'Prescription.js',  // NOUVEAU MODÈLE
-  'VideoCall.js'      // NOUVEAU MODÈLE
+  'Prescription.js',
+  'VideoCall.js',
+  'DoctorPayment.js'  // NOUVEAU MODÈLE AJOUTÉ
 ];
+
+// ✅ AJOUTER LE MODÈLE DOCTORPAYMENT DIRECTEMENT DANS DB
+if (DoctorPayment && DoctorPayment.name) {
+  db[DoctorPayment.name] = DoctorPayment;
+  console.log(`✅ Modèle chargé directement: ${DoctorPayment.name}`);
+}
 
 // ✅ CHARGER CHAQUE MODÈLE DIRECTEMENT
 modelFiles.forEach(file => {
@@ -214,13 +221,13 @@ function createModelDynamically(modelName) {
       };
       break;
 
-    case 'Prescription':  // NOUVEAU MODÈLE DYNAMIQUE
+    case 'Prescription':
       attributes = {
         ...attributes,
         patientId: { type: DataTypes.UUID, allowNull: false },
         doctorId: { type: DataTypes.UUID, allowNull: false },
         appointmentId: { type: DataTypes.UUID, allowNull: true },
-        medications: { type: DataTypes.JSONB, allowNull: false }, // [{ name, dosage, frequency, duration, instructions }]
+        medications: { type: DataTypes.JSONB, allowNull: false },
         diagnosis: DataTypes.TEXT,
         notes: DataTypes.TEXT,
         issueDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
@@ -243,7 +250,7 @@ function createModelDynamically(modelName) {
       ];
       break;
 
-    case 'VideoCall':  // NOUVEAU MODÈLE DYNAMIQUE
+    case 'VideoCall':
       attributes = {
         ...attributes,
         appointmentId: { type: DataTypes.UUID, allowNull: false, unique: true },
@@ -258,7 +265,7 @@ function createModelDynamically(modelName) {
         scheduledStartTime: { type: DataTypes.DATE, allowNull: false },
         actualStartTime: DataTypes.DATE,
         actualEndTime: DataTypes.DATE,
-        duration: DataTypes.INTEGER, // en secondes
+        duration: DataTypes.INTEGER,
         recordingUrl: DataTypes.STRING,
         recordingSid: DataTypes.STRING,
         recordingStatus: { 
@@ -285,6 +292,40 @@ function createModelDynamically(modelName) {
         { fields: ['roomName'], unique: true }
       ];
       break;
+
+    case 'DoctorPayment':  // NOUVEAU MODÈLE DYNAMIQUE DOCTORPAYMENT
+      attributes = {
+        ...attributes,
+        doctorId: { type: DataTypes.UUID, allowNull: false },
+        appointmentId: { type: DataTypes.UUID, allowNull: false },
+        patientId: { type: DataTypes.UUID, allowNull: false },
+        amount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+        platformFee: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+        doctorAmount: { type: DataTypes.DECIMAL(10, 2), allowNull: false },
+        currency: { type: DataTypes.STRING, defaultValue: 'EUR' },
+        status: { 
+          type: DataTypes.ENUM('pending', 'processed', 'paid', 'failed', 'cancelled'),
+          defaultValue: 'pending'
+        },
+        paymentMethod: { type: DataTypes.STRING },
+        transactionId: { type: DataTypes.STRING, unique: true },
+        paymentDate: DataTypes.DATE,
+        processedDate: DataTypes.DATE,
+        paidDate: DataTypes.DATE,
+        bankAccount: DataTypes.JSONB,
+        transferReference: DataTypes.STRING,
+        notes: DataTypes.TEXT,
+        invoiceUrl: DataTypes.STRING,
+        receiptUrl: DataTypes.STRING
+      };
+      options.indexes = [
+        { fields: ['doctorId'] },
+        { fields: ['appointmentId'], unique: true },
+        { fields: ['patientId'] },
+        { fields: ['status'] },
+        { fields: ['paymentDate'] }
+      ];
+      break;
   }
 
   const Model = sequelize.define(modelName, attributes, {
@@ -297,8 +338,8 @@ function createModelDynamically(modelName) {
   console.log(`✅ Modèle ${modelName} créé dynamiquement`);
 }
 
-// ✅ VÉRIFIER LES MODÈLES CRITIQUES (MISE À JOUR AVEC PRESCRIPTION ET VIDEOCALL)
-const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment', 'AuditLog', 'Prescription', 'VideoCall'];
+// ✅ VÉRIFIER LES MODÈLES CRITIQUES (MISE À JOUR AVEC DOCTORPAYMENT)
+const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment', 'AuditLog', 'Prescription', 'VideoCall', 'DoctorPayment'];
 criticalModels.forEach(modelName => {
   if (!db[modelName]) {
     createModelDynamically(modelName);
@@ -382,7 +423,7 @@ function setupAssociations() {
   }
 
   // ============================================
-  // NOUVELLES ASSOCIATIONS POUR Prescription
+  // ASSOCIATIONS POUR Prescription
   // ============================================
   
   // Prescription ↔ User (Patient)
@@ -407,7 +448,7 @@ function setupAssociations() {
   }
 
   // ============================================
-  // NOUVELLES ASSOCIATIONS POUR VideoCall
+  // ASSOCIATIONS POUR VideoCall
   // ============================================
   
   // VideoCall ↔ Appointment
@@ -436,10 +477,48 @@ function setupAssociations() {
     db.VideoCall.belongsTo(db.User, { as: 'endedByUser', foreignKey: 'endedBy' });
     console.log('✅ Associations VideoCall-EndedBy');
   }
+
+  // ============================================
+  // ASSOCIATIONS POUR DoctorPayment (NOUVELLES)
+  // ============================================
+  
+  // DoctorPayment ↔ User (Doctor)
+  if (db.DoctorPayment && db.User) {
+    db.DoctorPayment.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+    db.User.hasMany(db.DoctorPayment, { as: 'doctorPayments', foreignKey: 'doctorId' });
+    console.log('✅ Associations DoctorPayment-Doctor');
+  }
+
+  // DoctorPayment ↔ User (Patient)
+  if (db.DoctorPayment && db.User) {
+    db.DoctorPayment.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
+    db.User.hasMany(db.DoctorPayment, { as: 'patientDoctorPayments', foreignKey: 'patientId' });
+    console.log('✅ Associations DoctorPayment-Patient');
+  }
+
+  // DoctorPayment ↔ Appointment
+  if (db.DoctorPayment && db.Appointment) {
+    db.DoctorPayment.belongsTo(db.Appointment, { as: 'appointment', foreignKey: 'appointmentId' });
+    db.Appointment.hasOne(db.DoctorPayment, { as: 'doctorPayment', foreignKey: 'appointmentId' });
+    console.log('✅ Associations DoctorPayment-Appointment');
+  }
+
+  // DoctorPayment ↔ Payment (optionnel)
+  if (db.DoctorPayment && db.Payment) {
+    db.DoctorPayment.belongsTo(db.Payment, { as: 'payment', foreignKey: 'paymentId' });
+    db.Payment.hasOne(db.DoctorPayment, { as: 'doctorPayment', foreignKey: 'paymentId' });
+    console.log('✅ Associations DoctorPayment-Payment');
+  }
 }
 
 // Exécuter les associations
 setupAssociations();
+
+// ✅ APPEL DE L'ASSOCIATION DOCTORPAYMENT SI ELLE EXISTE (DEMANDE SPÉCIFIQUE)
+if (DoctorPayment && typeof DoctorPayment.associate === 'function') {
+  DoctorPayment.associate(db);
+  console.log('✅ Association DoctorPayment.associate() appelée');
+}
 
 // ✅ SUPPRESSION DE LA CONTRAINTE AVEC SQL DIRECT (SOLUTION ROBUSTE)
 async function removeForeignKeyConstraint() {
