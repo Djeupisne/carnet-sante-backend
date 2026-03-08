@@ -446,7 +446,22 @@ const startServer = async () => {
       } catch (calendarError) {
         console.error('❌ Erreur Calendar:', calendarError.message);
       }
+try {
+  const { Prescription, VideoCall } = require('./models');
 
+  if (Prescription) {
+    // alter:true crée la table si elle n'existe pas, sans écraser les données
+    await Prescription.sync({ alter: true, logging: false });
+    console.log('✅ Modèle Prescription synchronisé');
+  }
+
+  if (VideoCall) {
+    await VideoCall.sync({ alter: true, logging: false });
+    console.log('✅ Modèle VideoCall synchronisé');
+  }
+} catch (prescError) {
+  console.error('❌ Erreur synchronisation Prescription/VideoCall:', prescError.message);
+}
       console.log('✅ Tous les modèles sont prêts');
 
       try {
