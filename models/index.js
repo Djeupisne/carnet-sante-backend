@@ -5,7 +5,7 @@ const path = require('path');
 
 const db = {};
 
-// ✅ LISTE DES FICHIERS DE MODÈLES
+// ✅ LISTE DES FICHIERS DE MODÈLES (MISE À JOUR AVEC PRESCRIPTION ET VIDEOCALL)
 const modelFiles = [
   'MedicalFile.js',
   'Payment.js',
@@ -14,7 +14,9 @@ const modelFiles = [
   'Appointment.js',
   'AuditLog.js',
   'Review.js',
-  'Calendar.js'
+  'Calendar.js',
+  'Prescription.js',  // NOUVEAU MODÈLE
+  'VideoCall.js'      // NOUVEAU MODÈLE
 ];
 
 // ✅ CHARGER CHAQUE MODÈLE DIRECTEMENT
@@ -211,6 +213,78 @@ function createModelDynamically(modelName) {
         comment: DataTypes.TEXT
       };
       break;
+
+    case 'Prescription':  // NOUVEAU MODÈLE DYNAMIQUE
+      attributes = {
+        ...attributes,
+        patientId: { type: DataTypes.UUID, allowNull: false },
+        doctorId: { type: DataTypes.UUID, allowNull: false },
+        appointmentId: { type: DataTypes.UUID, allowNull: true },
+        medications: { type: DataTypes.JSONB, allowNull: false }, // [{ name, dosage, frequency, duration, instructions }]
+        diagnosis: DataTypes.TEXT,
+        notes: DataTypes.TEXT,
+        issueDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW },
+        expiryDate: DataTypes.DATE,
+        status: { 
+          type: DataTypes.ENUM('active', 'filled', 'expired', 'cancelled'),
+          defaultValue: 'active'
+        },
+        refills: { type: DataTypes.INTEGER, defaultValue: 0 },
+        refillsUsed: { type: DataTypes.INTEGER, defaultValue: 0 },
+        qrCode: DataTypes.STRING,
+        isElectronic: { type: DataTypes.BOOLEAN, defaultValue: true }
+      };
+      options.indexes = [
+        { fields: ['patientId'] },
+        { fields: ['doctorId'] },
+        { fields: ['appointmentId'] },
+        { fields: ['issueDate'] },
+        { fields: ['status'] }
+      ];
+      break;
+
+    case 'VideoCall':  // NOUVEAU MODÈLE DYNAMIQUE
+      attributes = {
+        ...attributes,
+        appointmentId: { type: DataTypes.UUID, allowNull: false, unique: true },
+        patientId: { type: DataTypes.UUID, allowNull: false },
+        doctorId: { type: DataTypes.UUID, allowNull: false },
+        roomName: { type: DataTypes.STRING, allowNull: false, unique: true },
+        roomSid: DataTypes.STRING,
+        status: { 
+          type: DataTypes.ENUM('scheduled', 'active', 'completed', 'missed', 'cancelled'),
+          defaultValue: 'scheduled'
+        },
+        scheduledStartTime: { type: DataTypes.DATE, allowNull: false },
+        actualStartTime: DataTypes.DATE,
+        actualEndTime: DataTypes.DATE,
+        duration: DataTypes.INTEGER, // en secondes
+        recordingUrl: DataTypes.STRING,
+        recordingSid: DataTypes.STRING,
+        recordingStatus: { 
+          type: DataTypes.ENUM('none', 'requested', 'in_progress', 'completed', 'failed'),
+          defaultValue: 'none'
+        },
+        participants: { type: DataTypes.JSONB, defaultValue: [] },
+        meetingUrl: DataTypes.STRING,
+        joinToken: DataTypes.TEXT,
+        endedBy: DataTypes.UUID,
+        endReason: DataTypes.STRING,
+        quality: { 
+          type: DataTypes.ENUM('excellent', 'good', 'fair', 'poor'),
+        },
+        notes: DataTypes.TEXT,
+        recordingConsent: { type: DataTypes.BOOLEAN, defaultValue: false }
+      };
+      options.indexes = [
+        { fields: ['appointmentId'], unique: true },
+        { fields: ['patientId'] },
+        { fields: ['doctorId'] },
+        { fields: ['status'] },
+        { fields: ['scheduledStartTime'] },
+        { fields: ['roomName'], unique: true }
+      ];
+      break;
   }
 
   const Model = sequelize.define(modelName, attributes, {
@@ -223,8 +297,8 @@ function createModelDynamically(modelName) {
   console.log(`✅ Modèle ${modelName} créé dynamiquement`);
 }
 
-// ✅ VÉRIFIER LES MODÈLES CRITIQUES
-const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment', 'AuditLog'];
+// ✅ VÉRIFIER LES MODÈLES CRITIQUES (MISE À JOUR AVEC PRESCRIPTION ET VIDEOCALL)
+const criticalModels = ['User', 'Appointment', 'Notification', 'Calendar', 'MedicalFile', 'Payment', 'AuditLog', 'Prescription', 'VideoCall'];
 criticalModels.forEach(modelName => {
   if (!db[modelName]) {
     createModelDynamically(modelName);
@@ -305,6 +379,62 @@ function setupAssociations() {
     });
     
     console.log('✅ Associations User-AuditLog (sans contrainte)');
+  }
+
+  // ============================================
+  // NOUVELLES ASSOCIATIONS POUR Prescription
+  // ============================================
+  
+  // Prescription ↔ User (Patient)
+  if (db.Prescription && db.User) {
+    db.Prescription.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
+    db.User.hasMany(db.Prescription, { as: 'patientPrescriptions', foreignKey: 'patientId' });
+    console.log('✅ Associations Prescription-Patient');
+  }
+
+  // Prescription ↔ User (Doctor)
+  if (db.Prescription && db.User) {
+    db.Prescription.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+    db.User.hasMany(db.Prescription, { as: 'doctorPrescriptions', foreignKey: 'doctorId' });
+    console.log('✅ Associations Prescription-Doctor');
+  }
+
+  // Prescription ↔ Appointment
+  if (db.Prescription && db.Appointment) {
+    db.Prescription.belongsTo(db.Appointment, { as: 'appointment', foreignKey: 'appointmentId' });
+    db.Appointment.hasMany(db.Prescription, { as: 'prescriptions', foreignKey: 'appointmentId' });
+    console.log('✅ Associations Prescription-Appointment');
+  }
+
+  // ============================================
+  // NOUVELLES ASSOCIATIONS POUR VideoCall
+  // ============================================
+  
+  // VideoCall ↔ Appointment
+  if (db.VideoCall && db.Appointment) {
+    db.VideoCall.belongsTo(db.Appointment, { as: 'appointment', foreignKey: 'appointmentId' });
+    db.Appointment.hasOne(db.VideoCall, { as: 'videoCall', foreignKey: 'appointmentId' });
+    console.log('✅ Associations VideoCall-Appointment');
+  }
+
+  // VideoCall ↔ User (Patient)
+  if (db.VideoCall && db.User) {
+    db.VideoCall.belongsTo(db.User, { as: 'patient', foreignKey: 'patientId' });
+    db.User.hasMany(db.VideoCall, { as: 'patientVideoCalls', foreignKey: 'patientId' });
+    console.log('✅ Associations VideoCall-Patient');
+  }
+
+  // VideoCall ↔ User (Doctor)
+  if (db.VideoCall && db.User) {
+    db.VideoCall.belongsTo(db.User, { as: 'doctor', foreignKey: 'doctorId' });
+    db.User.hasMany(db.VideoCall, { as: 'doctorVideoCalls', foreignKey: 'doctorId' });
+    console.log('✅ Associations VideoCall-Doctor');
+  }
+
+  // VideoCall ↔ User (EndedBy)
+  if (db.VideoCall && db.User) {
+    db.VideoCall.belongsTo(db.User, { as: 'endedByUser', foreignKey: 'endedBy' });
+    console.log('✅ Associations VideoCall-EndedBy');
   }
 }
 
